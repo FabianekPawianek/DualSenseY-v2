@@ -6,6 +6,7 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+#include <functional>
 
 namespace Tray
 {
@@ -15,9 +16,23 @@ namespace Tray
         Icon icon;
         std::string identifier;
         std::vector<std::shared_ptr<TrayEntry>> entries;
+        std::function<void()> clickCallback;
 
       public:
         BaseTray(std::string identifier, Icon icon);
+
+        void setOnClick(std::function<void()> callback)
+        {
+            clickCallback = std::move(callback);
+        }
+
+        void click()
+        {
+            if (clickCallback)
+            {
+                clickCallback();
+            }
+        }
 
         template <typename... T> void addEntries(const T &...entries)
         {

@@ -130,6 +130,14 @@ void Vigem::UpdateDs4ByTarget(PVIGEM_TARGET Target, s_ScePadData& state) {
 
 Vigem::Vigem(s_scePadSettings* scePadSettings, UDP& udp) : m_ScePadSettings(scePadSettings), m_Udp(udp) {
 #ifdef WINDOWS
+	for (uint32_t i = 0; i < 4; i++) {
+		m_360[i] = vigem_target_x360_alloc();
+		m_ds4[i] = vigem_target_ds4_alloc();
+		m_wasConnected[i] = false;
+		m_lastEmulatedController[i] = (uint32_t)EmulatedController::NONE;
+		m_lastPacketChangeTime[i] = std::chrono::steady_clock::time_point{};
+	}
+
 	if (!m_VigemClientInitalized) {
 		m_VigemClient = vigem_alloc();
 
@@ -145,11 +153,6 @@ Vigem::Vigem(s_scePadSettings* scePadSettings, UDP& udp) : m_ScePadSettings(sceP
 		LOGI("ViGEm Client initialized");
 		m_VigemClientInitalized = true;
 	}
-
-	for (uint32_t i = 0; i < 4; i++) {
-		m_360[i] = vigem_target_x360_alloc();
-		m_ds4[i] = vigem_target_ds4_alloc();
-	}
 #endif
 }
 
@@ -164,10 +167,7 @@ Vigem::~Vigem() {
 	}
 
 	for (uint32_t i = 0; i < 4; i++) {
-		vigem_target_x360_unregister_notification(m_360[i]);
-		vigem_target_remove(m_VigemClient, m_360[i]);
-		vigem_target_ds4_unregister_notification(m_ds4[i]);
-		vigem_target_remove(m_VigemClient, m_ds4[i]);
+		UnplugControllerByIndex(i);
 		vigem_target_free(m_360[i]);
 		vigem_target_free(m_ds4[i]);
 	}
@@ -179,29 +179,64 @@ Vigem::~Vigem() {
 
 void Vigem::PlugControllerByIndex(uint32_t index, uint32_t controllerType) {
 #ifdef WINDOWS
-	static uint32_t lastEmulatedController[4] = {};
+	if (index >= 4) return;
+	std::lock_guard<std::mutex> lock(m_ControllerMutex);
 
-	if ((EmulatedController)controllerType == EmulatedController::NONE && (EmulatedController)lastEmulatedController[index] != EmulatedController::NONE) {
-		vigem_target_remove(m_VigemClient, m_360[index]);
-		vigem_target_remove(m_VigemClient, m_ds4[index]);
+	// If controller is physically disconnected, do not plug the virtual controller.
+	if (!m_wasConnected[index]) {
+		return;
+	}
+
+	if ((EmulatedController)controllerType == EmulatedController::NONE && (EmulatedController)m_lastEmulatedController[index] != EmulatedController::NONE) {
+		if (vigem_target_is_attached(m_360[index])) {
+			vigem_target_x360_unregister_notification(m_360[index]);
+			vigem_target_remove(m_VigemClient, m_360[index]);
+		}
+		if (vigem_target_is_attached(m_ds4[index])) {
+			vigem_target_ds4_unregister_notification(m_ds4[index]);
+			vigem_target_remove(m_VigemClient, m_ds4[index]);
+		}
+		m_lastEmulatedController[index] = (uint32_t)EmulatedController::NONE;
+	}
+	else if ((EmulatedController)controllerType == EmulatedController::XBOX360 && (EmulatedController)m_lastEmulatedController[index] != EmulatedController::XBOX360) {
+		if (vigem_target_is_attached(m_ds4[index])) {
+			vigem_target_ds4_unregister_notification(m_ds4[index]);
+			vigem_target_remove(m_VigemClient, m_ds4[index]);
+		}
+		if (!vigem_target_is_attached(m_360[index])) {
+			vigem_target_add(m_VigemClient, m_360[index]);
+			vigem_target_x360_register_notification(m_VigemClient, m_360[index], xbox360Notification, &m_UserData[index]);
+		}
+		m_lastEmulatedController[index] = (uint32_t)EmulatedController::XBOX360;
+	}
+	else if ((EmulatedController)controllerType == EmulatedController::DUALSHOCK4 && (EmulatedController)m_lastEmulatedController[index] != EmulatedController::DUALSHOCK4) {
+		if (vigem_target_is_attached(m_360[index])) {
+			vigem_target_x360_unregister_notification(m_360[index]);
+			vigem_target_remove(m_VigemClient, m_360[index]);
+		}
+		if (!vigem_target_is_attached(m_ds4[index])) {
+			vigem_target_add(m_VigemClient, m_ds4[index]);
+			vigem_target_ds4_register_notification(m_VigemClient, m_ds4[index], ds4Notification, &m_UserData[index]);
+		}
+		m_lastEmulatedController[index] = (uint32_t)EmulatedController::DUALSHOCK4;
+	}
+#endif
+}
+
+void Vigem::UnplugControllerByIndex(uint32_t index) {
+#ifdef WINDOWS
+	if (index >= 4) return;
+	std::lock_guard<std::mutex> lock(m_ControllerMutex);
+
+	if (vigem_target_is_attached(m_360[index])) {
 		vigem_target_x360_unregister_notification(m_360[index]);
-		vigem_target_ds4_unregister_notification(m_ds4[index]);
-		lastEmulatedController[index] = (uint32_t)EmulatedController::NONE;
-	}
-	else if ((EmulatedController)controllerType == EmulatedController::XBOX360 && (EmulatedController)lastEmulatedController[index] != EmulatedController::XBOX360) {
-		vigem_target_remove(m_VigemClient, m_ds4[index]);
-		vigem_target_ds4_unregister_notification(m_ds4[index]);
-		vigem_target_add(m_VigemClient, m_360[index]);
-		vigem_target_x360_register_notification(m_VigemClient, m_360[index], xbox360Notification, &m_UserData[index]);
-		lastEmulatedController[index] = (uint32_t)EmulatedController::XBOX360;
-	}
-	else if ((EmulatedController)controllerType == EmulatedController::DUALSHOCK4 && (EmulatedController)lastEmulatedController[index] != EmulatedController::DUALSHOCK4) {
 		vigem_target_remove(m_VigemClient, m_360[index]);
-		vigem_target_x360_unregister_notification(m_360[index]);
-		vigem_target_add(m_VigemClient, m_ds4[index]);
-		vigem_target_ds4_register_notification(m_VigemClient, m_ds4[index], ds4Notification, &m_UserData[index]);
-		lastEmulatedController[index] = (uint32_t)EmulatedController::DUALSHOCK4;
 	}
+	if (vigem_target_is_attached(m_ds4[index])) {
+		vigem_target_ds4_unregister_notification(m_ds4[index]);
+		vigem_target_remove(m_VigemClient, m_ds4[index]);
+	}
+	m_lastEmulatedController[index] = (uint32_t)EmulatedController::NONE;
 #endif
 }
 
@@ -354,23 +389,66 @@ void Vigem::EmulatedControllerUpdate() {
 	liDueTime.QuadPart = -5000LL;
 
 	while (m_VigemThreadRunning) {
+		auto now = std::chrono::steady_clock::now();
+
 		for (uint32_t i = 0; i < 4; i++) {
+			s_scePadSettings settingsToUse = (m_SelectedController == i && m_Udp.IsActive()) ? m_Udp.GetSettings() : m_ScePadSettings[i];
 
-			if ((EmulatedController)m_ScePadSettings[i].emulatedController != EmulatedController::NONE) {
-				s_ScePadData scePadState = {};
-				uint32_t result = scePadReadState(g_ScePad[i], &scePadState);
+			s_ScePadData scePadState = {};
+			uint32_t result = scePadReadState(g_ScePad[i], &scePadState);
 
-				s_scePadSettings settingsToUse = (m_SelectedController == i && m_Udp.IsActive()) ? m_Udp.GetSettings() : m_ScePadSettings[i];
+			bool isConnected = false;
+
+			if (result == SCE_OK && scePadState.connected) {
+				bool isDeadZero = (scePadState.acceleration.x == 0.0f && scePadState.acceleration.y == 0.0f && scePadState.acceleration.z == 0.0f &&
+				                   scePadState.angularVelocity.x == 0.0f && scePadState.angularVelocity.y == 0.0f && scePadState.angularVelocity.z == 0.0f);
+
+				bool dataChanged = (scePadState.bitmask_buttons != m_lastButtons[i]) ||
+				                   (scePadState.LeftStick.X != m_lastLeftStick[i].X || scePadState.LeftStick.Y != m_lastLeftStick[i].Y) ||
+				                   (scePadState.RightStick.X != m_lastRightStick[i].X || scePadState.RightStick.Y != m_lastRightStick[i].Y) ||
+				                   (scePadState.L2_Analog != m_lastL2[i] || scePadState.R2_Analog != m_lastR2[i]) ||
+				                   (scePadState.acceleration.x != m_lastAccel[i].x || scePadState.acceleration.y != m_lastAccel[i].y || scePadState.acceleration.z != m_lastAccel[i].z) ||
+				                   (scePadState.angularVelocity.x != m_lastGyro[i].x || scePadState.angularVelocity.y != m_lastGyro[i].y || scePadState.angularVelocity.z != m_lastGyro[i].z);
+
+				if (dataChanged && !isDeadZero) {
+					m_lastPacketChangeTime[i] = now;
+					m_lastButtons[i] = scePadState.bitmask_buttons;
+					m_lastLeftStick[i] = scePadState.LeftStick;
+					m_lastRightStick[i] = scePadState.RightStick;
+					m_lastL2[i] = scePadState.L2_Analog;
+					m_lastR2[i] = scePadState.R2_Analog;
+					m_lastAccel[i] = scePadState.acceleration;
+					m_lastGyro[i] = scePadState.angularVelocity;
+				}
+
+				auto msSinceChange = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastPacketChangeTime[i]).count();
+				if (msSinceChange < 600 && !isDeadZero) {
+					isConnected = true;
+				}
+			}
+
+			// Edge detection: Connected -> Disconnected
+			if (m_wasConnected[i] && !isConnected) {
+				m_wasConnected[i] = false;
+				UnplugControllerByIndex(i);
+			}
+			// Edge detection: Disconnected -> Connected
+			else if (!m_wasConnected[i] && isConnected) {
+				m_wasConnected[i] = true;
+				if ((EmulatedController)settingsToUse.emulatedController != EmulatedController::NONE) {
+					PlugControllerByIndex(i, settingsToUse.emulatedController);
+				}
+			}
+
+			// Update emulated controller if connected and active
+			if (isConnected && (EmulatedController)settingsToUse.emulatedController != EmulatedController::NONE) {
 				applyInputSettingsToScePadState(settingsToUse, scePadState, i);
 
-				if (result == SCE_OK) {
-
-					if ((EmulatedController)m_ScePadSettings[i].emulatedController == EmulatedController::XBOX360) {
-						Update360ByTarget(m_360[i], scePadState);
-					}
-					else if ((EmulatedController)m_ScePadSettings[i].emulatedController == EmulatedController::DUALSHOCK4) {
-						UpdateDs4ByTarget(m_ds4[i], scePadState);
-					}
+				if ((EmulatedController)settingsToUse.emulatedController == EmulatedController::XBOX360) {
+					Update360ByTarget(m_360[i], scePadState);
+				}
+				else if ((EmulatedController)settingsToUse.emulatedController == EmulatedController::DUALSHOCK4) {
+					UpdateDs4ByTarget(m_ds4[i], scePadState);
 				}
 			}
 		}

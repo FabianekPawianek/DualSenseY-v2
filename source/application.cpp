@@ -1,4 +1,4 @@
-﻿#define NOMINMAX
+#define NOMINMAX
 #include "application.hpp"
 #include "log.hpp"
 
@@ -73,9 +73,20 @@ LRESULT CALLBACK CustomWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 #endif
 
 bool Application::IsMinimized() {
-	ImGuiIO& io = ImGui::GetIO();
-	bool isMinimized = glfwGetWindowAttrib(m_GlfwWindow.get(), GLFW_ICONIFIED);
-	bool isFocused = glfwGetWindowAttrib(m_GlfwWindow.get(), GLFW_FOCUSED);
+	if (!m_GlfwWindow) return true;
+#ifdef WINDOWS
+	HWND hwnd = glfwGetWin32Window(m_GlfwWindow.get());
+	if (hwnd) {
+		bool isForeground = (GetForegroundWindow() == hwnd);
+		bool isIconic = IsIconic(hwnd) != 0;
+		bool isVisible = IsWindowVisible(hwnd) != 0;
+		if (!isForeground || isIconic || !isVisible) {
+			return true;
+		}
+	}
+#endif
+	bool isMinimized = glfwGetWindowAttrib(m_GlfwWindow.get(), GLFW_ICONIFIED) != 0;
+	bool isFocused = glfwGetWindowAttrib(m_GlfwWindow.get(), GLFW_FOCUSED) != 0;
 	return (isMinimized || !isFocused);
 }
 
@@ -83,7 +94,10 @@ void Application::DisableControllerInputIfMinimized() {
 	ImGuiIO& io = ImGui::GetIO();
 
 	if (IsMinimized()) {
-		io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
+		if (io.ConfigFlags & ImGuiConfigFlags_NavEnableGamepad) {
+			io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
+			io.ClearInputKeys();
+		}
 	}
 	else {
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
@@ -168,6 +182,9 @@ bool Application::Run(const std::string& Argument1) {
 	bool active = false;
 	uint32_t occasionalFrameWhenMinimized = 0;
 	while (!glfwWindowShouldClose(m_GlfwWindow.get())) {
+		glfwPollEvents();
+		DisableControllerInputIfMinimized();
+
 		bool v_isMinimized = IsMinimized();
 		occasionalFrameWhenMinimized = v_isMinimized ? occasionalFrameWhenMinimized + 1 : 0;
 
@@ -217,9 +234,6 @@ bool Application::Run(const std::string& Argument1) {
 		}
 
 	#pragma region ImGUI + GLFW
-		DisableControllerInputIfMinimized();
-		glfwPollEvents();
-
 		if (finishFrame) {
 			main.Show(m_ScePadSettings, xscale);
 			ImGui::Render();
@@ -457,6 +471,9 @@ void Application::SetStyleAndColors() {
 
 void Application::SetupTray() {
 	m_Tray = std::make_unique<Tray::Tray>("DualSenseY", RESOURCES_PATH "images/icon.ico");
+	m_Tray->setOnClick([this] {
+		RestoreWindowFromTray();
+	});
 	m_Tray->addEntry(Tray::Button("Show window", [&] {
 		RestoreWindowFromTray();
 	}));
@@ -486,6 +503,14 @@ void Application::RestoreWindowFromTray() {
 	glfwShowWindow(m_GlfwWindow.get());
 	glfwRestoreWindow(m_GlfwWindow.get());
 	glfwFocusWindow(m_GlfwWindow.get());
+#ifdef WINDOWS
+	HWND hwnd = glfwGetWin32Window(m_GlfwWindow.get());
+	if (hwnd) {
+		ShowWindow(hwnd, SW_RESTORE);
+		SetForegroundWindow(hwnd);
+		BringWindowToTop(hwnd);
+	}
+#endif
 }
 
 Application::~Application() {

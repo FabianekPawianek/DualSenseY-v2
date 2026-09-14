@@ -18,6 +18,7 @@
 #include "scePadHandle.hpp"
 #include <atomic>
 #include <thread>
+#include <mutex>
 #include "udp.hpp"
 #include <client.hpp>
 #include <unordered_map>
@@ -53,6 +54,19 @@ private:
    void EmulatedControllerUpdate();
    std::weak_ptr <std::unordered_map<uint32_t, PeerControllerData>> m_PeerControllers;
    std::unordered_map<uint32_t, PVIGEM_TARGET> m_PeerControllerTargets;
+
+   std::mutex m_ControllerMutex;
+   uint32_t m_lastEmulatedController[4] = {};
+   bool m_wasConnected[4] = {};
+   std::chrono::steady_clock::time_point m_lastPacketChangeTime[4] = {};
+   uint64_t m_lastTimestamp[4] = {};
+   uint32_t m_lastButtons[4] = {};
+   s_SceStickData m_lastLeftStick[4] = {};
+   s_SceStickData m_lastRightStick[4] = {};
+   uint8_t m_lastL2[4] = {};
+   uint8_t m_lastR2[4] = {};
+   s_SceFVector3 m_lastAccel[4] = {};
+   s_SceFVector3 m_lastGyro[4] = {};
 #endif
 
    void applyInputSettingsToScePadState(s_scePadSettings& settings, s_ScePadData& state, int controllerIndex = -1);
@@ -63,6 +77,7 @@ public:
 	Vigem(s_scePadSettings* scePadSettings, UDP& udp);
    ~Vigem();
    void PlugControllerByIndex(uint32_t index, uint32_t controllerType);  
+   void UnplugControllerByIndex(uint32_t index);
    bool IsVigemConnected(); 
    void SetSelectedController(uint32_t selectedController);
    void SetPeerControllerDataPointer(std::shared_ptr<std::unordered_map<uint32_t, PeerControllerData>> Pointer);

@@ -169,7 +169,16 @@ LRESULT CALLBACK Tray::Tray::wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
     switch (msg)
     {
     case WM_TRAY:
-        if (lParam == WM_RBUTTONUP)
+        if (lParam == WM_LBUTTONUP || lParam == WM_LBUTTONDBLCLK)
+        {
+            auto it = trayList.find(hwnd);
+            if (it != trayList.end())
+            {
+                it->second.get().click();
+            }
+            return 0;
+        }
+        else if (lParam == WM_RBUTTONUP)
         {
             POINT p;
             GetCursorPos(&p);
