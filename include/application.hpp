@@ -9,6 +9,10 @@
 #include "appSettings.hpp"
 #include <thread>
 #include <tray.hpp>
+#include "batteryIconRenderer.hpp"
+#include "strings.hpp"
+
+#include <chrono>
 
 constexpr auto WIN32_MSG_WINDOW_MUTEX = "DSYMSG";
 
@@ -27,7 +31,24 @@ private:
 	AppSettings m_AppSettings = {};
 	static void IconifyCallback(GLFWwindow* window, int iconified);
 	std::unique_ptr<Tray::Tray> m_Tray;
-	std::thread m_TrayThread;         
+	std::thread m_TrayThread;
+
+#if defined(_WIN32)
+	BatteryIconRenderer m_BatteryIconRenderer;
+	HICON m_CurrentTrayIcon = nullptr;
+	bool m_HasNotifiedLowBattery[4] = { false, false, false, false };
+	bool m_WasConnected[4] = { false, false, false, false };
+	std::chrono::steady_clock::time_point m_ConnectionStartTime[4] = {};
+	std::chrono::steady_clock::time_point m_ZeroBatteryStartTime[4] = {};
+	uint8_t m_LastTrayBatteryLevel = 255;
+	int m_LastTrayBatteryBracket = -1;
+	bool m_LastTrayCharging = false;
+	bool m_LastTrayConnected = false;
+	bool m_LastTrayLightTheme = false;
+	int m_LastTrayIconSize = 0;
+	std::chrono::steady_clock::time_point m_LastTrayUpdateTime = {};
+	void UpdateTrayBatteryStatus(int controllerIndex, Strings& strings);
+#endif
 public:
 	enum class Platform {
 		Windows,

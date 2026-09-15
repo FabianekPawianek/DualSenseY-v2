@@ -165,5 +165,16 @@
   "HapticsAtModeResistance": "Opór",
   "HapticsAtSwapTriggers": "Zamień spusty",
   "HapticsAtAudioPassthroughNotice": "Audio passthrough musi być włączone, aby funkcja działała.",
-  "HapticsAtPriorityNotice": "(Haptyka do AT jest aktywna i ma priorytet nad Rumble do AT)"
+  "HapticsAtPriorityNotice": "(Haptyka do AT jest aktywna i ma priorytet nad Rumble do AT)",
+  "BatterySection": "Bateria",
+  "BatteryLevel": "Poziom naładowania",
+  "Battery": "Bateria",
+  "Charging": "Ładowanie",
+  "Discharging": "Rozładowywanie",
+  "LowBatteryNotification": "Powiadomienie na pulpicie o niskim stanie baterii",
+  "LowBatteryThreshold": "Próg ostrzeżenia o niskim stanie baterii",
+  "LowBatteryLedFlash": "Pulsowanie lightbara na czerwono przy niskim stanie baterii",
+  "LowBatteryWarningTitle": "DualSenseY - Ostrzeżenie o baterii",
+  "LowBatteryWarningMsg": "Niski poziom naładowania baterii kontrolera (%d%%)! Podłącz ładowarkę.",
+  "Disconnected": "Rozłączony"
 }

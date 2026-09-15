@@ -215,6 +215,9 @@ bool Application::Run(const std::string& Argument1) {
 	#pragma endregion
 
 		int selectedController = main.GetSelectedController();
+#if defined(_WIN32)
+		UpdateTrayBatteryStatus(selectedController, strings);
+#endif
 		vigem.SetSelectedController(selectedController);
 		client.SetSelectedController(selectedController);
 		udp.SetVibrationToUdpConfig(m_ScePadSettings[selectedController].rumbleFromEmulatedController);
@@ -471,6 +474,9 @@ void Application::SetStyleAndColors() {
 
 void Application::SetupTray() {
 	m_Tray = std::make_unique<Tray::Tray>("DualSenseY", RESOURCES_PATH "images/icon.ico");
+#if defined(_WIN32)
+	m_BatteryIconRenderer.Init(RESOURCES_PATH "images/battery/");
+#endif
 	m_Tray->setOnClick([this] {
 		RestoreWindowFromTray();
 	});
@@ -494,6 +500,149 @@ void Application::SetupTray() {
 	});
 	m_TrayThread.detach();
 }
+
+#if defined(_WIN32)
+void Application::UpdateTrayBatteryStatus(int controllerIndex, Strings& strings) {
+	if (!m_Tray) return;
+
+	auto now = std::chrono::steady_clock::now();
+	auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_LastTrayUpdateTime).count();
+
+	s_ScePadData padState = {};
+	bool connected = (controllerIndex >= 0 && controllerIndex < 4 &&
+	                  scePadReadState(g_ScePad[controllerIndex], &padState) == SCE_OK &&
+	                  padState.connected);
+
+	uint8_t batteryLevel = connected ? padState.batteryLevel : 0;
+	bool isCharging = connected ? padState.isCharging : false;
+
+	// Track connection state & grace period per controller
+	if (controllerIndex >= 0 && controllerIndex < 4) {
+		if (connected && !m_WasConnected[controllerIndex]) {
+			m_WasConnected[controllerIndex] = true;
+			m_ConnectionStartTime[controllerIndex] = now;
+			m_ZeroBatteryStartTime[controllerIndex] = (batteryLevel == 0) ? now : std::chrono::steady_clock::time_point{};
+		} else if (!connected && m_WasConnected[controllerIndex]) {
+			m_WasConnected[controllerIndex] = false;
+			m_HasNotifiedLowBattery[controllerIndex] = false;
+			m_ZeroBatteryStartTime[controllerIndex] = {};
+			m_ConnectionStartTime[controllerIndex] = {};
+		}
+	}
+
+	// Low battery notification check
+	if (connected && controllerIndex >= 0 && controllerIndex < 4) {
+		s_scePadSettings& settings = m_ScePadSettings[controllerIndex];
+
+		// Glitch filter: Track duration of 0% battery reading
+		if (batteryLevel == 0) {
+			if (m_ZeroBatteryStartTime[controllerIndex] == std::chrono::steady_clock::time_point{}) {
+				m_ZeroBatteryStartTime[controllerIndex] = now;
+			}
+		} else {
+			m_ZeroBatteryStartTime[controllerIndex] = {};
+		}
+
+		auto connectionDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+			now - m_ConnectionStartTime[controllerIndex]
+		).count();
+
+		bool isStableZero = false;
+		if (batteryLevel == 0 && m_ZeroBatteryStartTime[controllerIndex] != std::chrono::steady_clock::time_point{}) {
+			auto zeroDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+				now - m_ZeroBatteryStartTime[controllerIndex]
+			).count();
+			isStableZero = (zeroDurationMs >= 3000);
+		}
+
+		// 1. Grace period: at least 3000 ms connected
+		// 2. Glitch filter: batteryLevel > 0 OR continuous 0% for >= 3000 ms
+		bool batteryValid = (connectionDurationMs >= 3000) && (batteryLevel > 0 || isStableZero);
+
+		if (settings.lowBatteryNotification && !isCharging && batteryValid && batteryLevel <= (uint8_t)settings.lowBatteryThreshold) {
+			if (!m_HasNotifiedLowBattery[controllerIndex]) {
+				m_HasNotifiedLowBattery[controllerIndex] = true;
+				std::string title = strings.GetString("LowBatteryWarningTitle");
+				char msgBuf[256];
+				snprintf(msgBuf, sizeof(msgBuf), strings.GetString("LowBatteryWarningMsg").c_str(), (int)batteryLevel);
+				m_Tray->showNotification(title, msgBuf);
+			}
+		} else if (isCharging || batteryLevel > (uint8_t)std::min(100, settings.lowBatteryThreshold + 3)) {
+			// 3. Hysteresis: Reset flag only when charging or battery rises clearly above threshold
+			m_HasNotifiedLowBattery[controllerIndex] = false;
+		}
+	} else if (controllerIndex >= 0 && controllerIndex < 4) {
+		m_HasNotifiedLowBattery[controllerIndex] = false;
+	}
+
+	// Update tray icon & tooltip
+	bool isLightTheme = BatteryIconRenderer::IsSystemLightTheme();
+	int iconSize = GetSystemMetrics(SM_CXSMICON);
+	if (iconSize <= 0) iconSize = 16;
+
+	int batteryBracket = BatteryIconRenderer::GetBatteryBracket(batteryLevel);
+
+	bool iconChanged = (connected != m_LastTrayConnected ||
+	                    isCharging != m_LastTrayCharging ||
+	                    batteryBracket != m_LastTrayBatteryBracket ||
+	                    isLightTheme != m_LastTrayLightTheme ||
+	                    iconSize != m_LastTrayIconSize ||
+	                    m_CurrentTrayIcon == nullptr);
+
+	bool tooltipChanged = (connected != m_LastTrayConnected ||
+	                       batteryLevel != m_LastTrayBatteryLevel ||
+	                       isCharging != m_LastTrayCharging);
+
+	bool timeToUpdate = (elapsedMs >= 1500);
+
+	if (iconChanged) {
+		m_LastTrayUpdateTime = now;
+		m_LastTrayConnected = connected;
+		m_LastTrayBatteryLevel = batteryLevel;
+		m_LastTrayBatteryBracket = batteryBracket;
+		m_LastTrayCharging = isCharging;
+		m_LastTrayLightTheme = isLightTheme;
+		m_LastTrayIconSize = iconSize;
+
+		HICON newIcon = m_BatteryIconRenderer.GenerateBatteryIcon(connected, batteryLevel, isCharging, iconSize);
+		if (newIcon) {
+			char tooltip[128];
+			if (connected) {
+				if (isCharging) {
+					snprintf(tooltip, sizeof(tooltip), "DualSenseY: %d%% [%s]", (int)batteryLevel, strings.GetString("Charging").c_str());
+				} else {
+					snprintf(tooltip, sizeof(tooltip), "DualSenseY: %d%%", (int)batteryLevel);
+				}
+			} else {
+				snprintf(tooltip, sizeof(tooltip), "DualSenseY (%s)", strings.GetString("Disconnected").c_str());
+			}
+
+			m_Tray->updateTrayIcon(newIcon, tooltip);
+
+			if (m_CurrentTrayIcon) {
+				DestroyIcon(m_CurrentTrayIcon);
+			}
+			m_CurrentTrayIcon = newIcon;
+		}
+	} else if (tooltipChanged && timeToUpdate) {
+		m_LastTrayUpdateTime = now;
+		m_LastTrayBatteryLevel = batteryLevel;
+
+		char tooltip[128];
+		if (connected) {
+			if (isCharging) {
+				snprintf(tooltip, sizeof(tooltip), "DualSenseY: %d%% [%s]", (int)batteryLevel, strings.GetString("Charging").c_str());
+			} else {
+				snprintf(tooltip, sizeof(tooltip), "DualSenseY: %d%%", (int)batteryLevel);
+			}
+		} else {
+			snprintf(tooltip, sizeof(tooltip), "DualSenseY (%s)", strings.GetString("Disconnected").c_str());
+		}
+
+		m_Tray->updateTrayIcon(nullptr, tooltip);
+	}
+}
+#endif
 
 void Application::HideWindowToTray() {
 	glfwHideWindow(m_GlfwWindow.get());
@@ -533,6 +682,13 @@ Application::~Application() {
 	m_Tray->exit();
 	if(m_TrayThread.joinable())
 		m_TrayThread.join();
+
+#if defined(_WIN32)
+	if (m_CurrentTrayIcon) {
+		DestroyIcon(m_CurrentTrayIcon);
+		m_CurrentTrayIcon = nullptr;
+	}
+#endif
 
 	ImGui_ImplOpenGL3_Shutdown();
 	ImGui_ImplGlfw_Shutdown();

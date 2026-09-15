@@ -30,6 +30,9 @@ namespace Tray
         void run() override;
         void exit() override;
         void update() override;
+
+        void updateTrayIcon(HICON newIcon, const std::string &tooltip);
+        void showNotification(const std::string &title, const std::string &message);
     };
 } // namespace Tray
 #endif

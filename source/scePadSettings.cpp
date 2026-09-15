@@ -2,6 +2,7 @@
 #include "led.hpp"
 #include <algorithm>
 #include <fstream>
+#include <chrono>
 #include <imgui.h>
 #include <platform_folders.h>
 
@@ -140,7 +141,17 @@ void applySettings(uint32_t index, s_scePadSettings settings, AudioPassthrough &
 	float audioPeak = audio.GetCurrentCapturePeak();
 	uint8_t audioPeakUint8 = (uint8_t)scaleFloatToInt(audioPeak, 1.0);
 
-	if (settings.useLightbarFromEmulatedController && (settings.emulatedController == (int)EmulatedController::DUALSHOCK4 || settings.usingPeerController))
+	s_ScePadData padData = {};
+	bool hasPadData = (scePadReadState(g_ScePad[index], &padData) == SCE_OK);
+
+	if (hasPadData && padData.connected && settings.lowBatteryLedFlash && !padData.isCharging && padData.batteryLevel <= (uint8_t)settings.lowBatteryThreshold)
+	{
+		auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+		bool flashOn = (nowMs / 500) % 2 == 0;
+		s_SceLightBar lightbar = flashOn ? s_SceLightBar{ 255, 0, 0 } : s_SceLightBar{ 0, 0, 0 };
+		scePadSetLightBar(g_ScePad[index], &lightbar);
+	}
+	else if (settings.useLightbarFromEmulatedController && (settings.emulatedController == (int)EmulatedController::DUALSHOCK4 || settings.usingPeerController))
 	{
 		scePadSetLightBar(g_ScePad[index], &settings.lightbarFromEmulatedController);
 	}

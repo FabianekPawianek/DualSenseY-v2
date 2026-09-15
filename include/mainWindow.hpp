@@ -46,6 +46,7 @@ private:
 	bool MenuBar(int& currentController, s_scePadSettings& scePadSettings);
 	bool Controllers(int& currentController, s_scePadSettings& scePadSettings, float scale);
 	bool Led(s_scePadSettings& scePadSettings, float scale);
+	bool Battery(int currentController, s_scePadSettings& scePadSettings, s_ScePadData& state);
 	bool Audio(int currentController, s_scePadSettings& scePadSettings);
 	bool Emulation(int currentController, s_scePadSettings& scePadSettings, s_ScePadData& state);
 	bool AdaptiveTriggers(s_scePadSettings& scePadSettings);

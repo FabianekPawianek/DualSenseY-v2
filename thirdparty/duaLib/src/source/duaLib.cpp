@@ -1243,6 +1243,19 @@ int scePadReadState(int handle, s_ScePadData* data) {
 				data->deviceUniqueData[j] = {};
 			data->deviceUniqueDataLen = sizeof(data->deviceUniqueData);
 		#pragma endregion
+
+		#pragma region battery
+			{
+				uint8_t rawPower = controller.dualsenseCurInputState.PowerPercent;
+				dualsenseData::PowerState pState = controller.dualsenseCurInputState.powerState;
+				data->isCharging = (pState == dualsenseData::PowerState::Charging);
+				if (pState == dualsenseData::PowerState::Complete) {
+					data->batteryLevel = 100;
+				} else {
+					data->batteryLevel = (uint8_t)std::min<uint32_t>(100, (uint32_t)rawPower * 10);
+				}
+			}
+		#pragma endregion
 		}
 		else if (controller.deviceType == DUALSHOCK4) {
 		#pragma region buttons
@@ -1364,6 +1377,11 @@ int scePadReadState(int handle, s_ScePadData* data) {
 			for (int j = 0; j < 12; j++)
 				data->deviceUniqueData[j] = {};
 			data->deviceUniqueDataLen = sizeof(data->deviceUniqueData);
+		#pragma endregion
+
+		#pragma region battery
+			data->batteryLevel = (uint8_t)std::min<uint32_t>(100, (uint32_t)controller.dualshock4CurInputState.PowerPercent * 10);
+			data->isCharging = (controller.dualshock4CurInputState.PluggedPowerCable != 0 && controller.dualshock4CurInputState.PowerPercent <= 10);
 		#pragma endregion
 
 		}
@@ -2070,6 +2088,35 @@ void *scePadGetHidApiHandle(int handle)
 		return controller.handle;
 	}
 	return nullptr;
+}
+
+int scePadGetBatteryInfo(int handle, uint8_t* batteryLevel, bool* isCharging) {
+	if (!g_initialized) return SCE_PAD_ERROR_NOT_INITIALIZED;
+
+	for (auto& controller : g_controllers) {
+		std::shared_lock lock(controller.lock);
+
+		if (controller.sceHandle != handle) continue;
+		if (!controller.valid) return SCE_PAD_ERROR_DEVICE_NOT_CONNECTED;
+
+		if (controller.deviceType == DUALSENSE) {
+			uint8_t rawPower = controller.dualsenseCurInputState.PowerPercent;
+			dualsenseData::PowerState pState = controller.dualsenseCurInputState.powerState;
+			if (isCharging) *isCharging = (pState == dualsenseData::PowerState::Charging);
+			if (batteryLevel) {
+				if (pState == dualsenseData::PowerState::Complete)
+					*batteryLevel = 100;
+				else
+					*batteryLevel = (uint8_t)std::min<uint32_t>(100, (uint32_t)rawPower * 10);
+			}
+			return SCE_OK;
+		} else if (controller.deviceType == DUALSHOCK4) {
+			if (isCharging) *isCharging = (controller.dualshock4CurInputState.PluggedPowerCable != 0 && controller.dualshock4CurInputState.PowerPercent <= 10);
+			if (batteryLevel) *batteryLevel = (uint8_t)std::min<uint32_t>(100, (uint32_t)controller.dualshock4CurInputState.PowerPercent * 10);
+			return SCE_OK;
+		}
+	}
+	return SCE_PAD_ERROR_INVALID_HANDLE;
 }
 
 #if COMPILE_TO_EXE

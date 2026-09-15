@@ -232,7 +232,7 @@ bool MainWindow::Controllers(int &currentController, s_scePadSettings &scePadSet
 	{
 		s_ScePadData data = {};
 		int result = scePadReadState(g_ScePad[i], &data);
-		if (result == SCE_OK)
+		if (result == SCE_OK && data.connected)
 		{
 			noneConnected = false;
 			ImGui::RadioButton(std::to_string(i + 1).c_str(), &currentController, i);
@@ -246,7 +246,70 @@ bool MainWindow::Controllers(int &currentController, s_scePadSettings &scePadSet
 		return false;
 	}
 
+	s_ScePadData curData = {};
+	if (scePadReadState(g_ScePad[currentController], &curData) == SCE_OK && curData.connected)
+	{
+		ImGui::SameLine();
+		ImGui::Text("|");
+		ImGui::SameLine();
+		ImGui::Text("%s:", cstr("Battery"));
+		ImGui::SameLine();
+
+		ImVec4 battColor;
+		if (curData.batteryLevel > 50)
+		{
+			battColor = ImVec4(0.2f, 1.0f, 0.2f, 1.0f);
+		}
+		else if (curData.batteryLevel >= 20)
+		{
+			battColor = ImVec4(1.0f, 0.65f, 0.0f, 1.0f);
+		}
+		else
+		{
+			battColor = ImVec4(1.0f, 0.25f, 0.25f, 1.0f);
+		}
+
+		std::string battText = std::to_string(curData.batteryLevel) + "%";
+		std::string statusText = curData.isCharging ? std::string(" [") + strr("Charging") + "]" : std::string(" [") + strr("Discharging") + "]";
+		ImGui::TextColored(battColor, "%s%s", battText.c_str(), statusText.c_str());
+	}
+
 	ImGui::NewLine();
+	return true;
+}
+
+bool MainWindow::Battery(int currentController, s_scePadSettings &scePadSettings, s_ScePadData &state)
+{
+	ImGui::SeparatorText(cstr("BatterySection"));
+
+	ImVec4 battColor;
+	if (state.batteryLevel > 50)
+	{
+		battColor = ImVec4(0.2f, 1.0f, 0.2f, 1.0f);
+	}
+	else if (state.batteryLevel >= 20)
+	{
+		battColor = ImVec4(1.0f, 0.65f, 0.0f, 1.0f);
+	}
+	else
+	{
+		battColor = ImVec4(1.0f, 0.25f, 0.25f, 1.0f);
+	}
+
+	std::string battText = std::to_string(state.batteryLevel) + "%";
+	std::string statusText = state.isCharging ? std::string(" [") + strr("Charging") + "]" : std::string(" [") + strr("Discharging") + "]";
+	ImGui::Text("%s:", cstr("BatteryLevel"));
+	ImGui::SameLine();
+	ImGui::TextColored(battColor, "%s%s", battText.c_str(), statusText.c_str());
+
+	ImGui::Checkbox(cstr("LowBatteryNotification"), &scePadSettings.lowBatteryNotification);
+	if (scePadSettings.lowBatteryNotification || scePadSettings.lowBatteryLedFlash)
+	{
+		ImGui::SetNextItemWidth(300);
+		ImGui::SliderInt(cstr("LowBatteryThreshold"), &scePadSettings.lowBatteryThreshold, 5, 25, "%d%%");
+	}
+	ImGui::Checkbox(cstr("LowBatteryLedFlash"), &scePadSettings.lowBatteryLedFlash);
+
 	return true;
 }
 
@@ -1842,6 +1905,7 @@ void MainWindow::Show(s_scePadSettings scePadSettings[4], float scale)
 	{
 		Emulation(c, scePadSettings[c], state);
 		Led(scePadSettings[c], scale);
+		Battery(c, scePadSettings[c], state);
 		AdaptiveTriggers(scePadSettings[c]);
 		Audio(c, scePadSettings[c]);
 		Touchpad(c, scePadSettings[c], state, scale);

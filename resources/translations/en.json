@@ -173,5 +173,16 @@
   "HapticsAtModeResistance": "Resistance",
   "HapticsAtSwapTriggers": "Swap triggers",
   "HapticsAtAudioPassthroughNotice": "Audio passthrough must be enabled for this feature to work.",
-  "HapticsAtPriorityNotice": "(Haptics to AT is active and takes priority over Rumble to AT)"
+  "HapticsAtPriorityNotice": "(Haptics to AT is active and takes priority over Rumble to AT)",
+  "BatterySection": "Battery",
+  "BatteryLevel": "Battery level",
+  "Battery": "Battery",
+  "Charging": "Charging",
+  "Discharging": "Discharging",
+  "LowBatteryNotification": "Low battery desktop notification",
+  "LowBatteryThreshold": "Low battery warning threshold",
+  "LowBatteryLedFlash": "Flash controller lightbar red on low battery",
+  "LowBatteryWarningTitle": "DualSenseY - Battery Warning",
+  "LowBatteryWarningMsg": "Controller battery is low (%d%%)! Please connect charger.",
+  "Disconnected": "Disconnected"
 }

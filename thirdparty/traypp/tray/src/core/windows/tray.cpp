@@ -84,6 +84,28 @@ void Tray::Tray::update()
     SendMessage(hwnd, WM_INITMENUPOPUP, reinterpret_cast<WPARAM>(menu), 0);
 }
 
+void Tray::Tray::updateTrayIcon(HICON newIcon, const std::string &tooltip)
+{
+    notifyData.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+    notifyData.uCallbackMessage = WM_TRAY;
+    if (newIcon)
+    {
+        notifyData.hIcon = newIcon;
+    }
+    strncpy_s(notifyData.szTip, sizeof(notifyData.szTip), tooltip.c_str(), _TRUNCATE);
+    Shell_NotifyIcon(NIM_MODIFY, &notifyData);
+}
+
+void Tray::Tray::showNotification(const std::string &title, const std::string &message)
+{
+    NOTIFYICONDATA nid = notifyData;
+    nid.uFlags |= NIF_INFO;
+    nid.dwInfoFlags = NIIF_WARNING;
+    strncpy_s(nid.szInfoTitle, sizeof(nid.szInfoTitle), title.c_str(), _TRUNCATE);
+    strncpy_s(nid.szInfo, sizeof(nid.szInfo), message.c_str(), _TRUNCATE);
+    Shell_NotifyIcon(NIM_MODIFY, &nid);
+}
+
 HMENU Tray::Tray::construct(const std::vector<std::shared_ptr<TrayEntry>> &entries, Tray *parent, bool cleanup)
 {
     static auto id = 0;

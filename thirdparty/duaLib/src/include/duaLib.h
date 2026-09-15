@@ -286,7 +286,8 @@ typedef struct {
 	uint64_t timestamp;
 	s_ScePadExtUnitData extUnitData;
 	uint8_t connectionCount;
-	uint8_t reserved[2];
+	uint8_t batteryLevel;
+	bool isCharging;
 	uint8_t deviceUniqueDataLen;
 	uint8_t deviceUniqueData[12];
 
@@ -433,6 +434,7 @@ extern "C" {
  std::string scePadGetPath(int handle);
  int scePadSetTriggerEffectCustom(int handle, uint8_t left[11], uint8_t right[11], uint8_t triggerBitmask);
  void* scePadGetHidApiHandle(int handle);
+ int scePadGetBatteryInfo(int handle, uint8_t* batteryLevel, bool* isCharging);
 #ifdef __cplusplus
 }
 #endif

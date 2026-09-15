@@ -185,6 +185,11 @@ struct s_scePadSettings {
 	// HidHide
 	bool Hidden = false;
 	bool WasHidHideRanAfterLoad = true; // When config is loaded, set to false. Set to true after HidHide is ran once.
+
+	// Battery
+	bool lowBatteryNotification = true;
+	int lowBatteryThreshold = 10;
+	bool lowBatteryLedFlash = true;
 };
 
 #pragma pack(push, 1)
@@ -211,69 +216,151 @@ struct s_ScePadSettingsSimple {
 };
 #pragma pack(pop)
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
-	s_scePadSettings,
-	udpConfig,
-	led,
-	audioToLed,
-	brightness,
-	disablePlayerLed,
-	discoMode,
-	discoModeSpeed,
-	audioPassthrough,
-	speakerVolume,
-	micGain,
-	audioPath,
-	hapticIntensity,
-	currentSonyItem,
-	currentDSXItem,
-	uiSelectedTrigger,
-	uiParameters,
-	uiTriggerFormat,
-	uiSelectedSonyTriggerMode,
-	uiSelectedDSXTriggerMode,
-	xToAtFullyRetractWhenNoData,
-	rumbleToAT,
-	rumbleToAt_intensity,
-	rumbleToAt_frequency,
-	rumbleToAt_position,
-	rumbleToAt_swapTriggers,
-	hapticsToAt,
-	hapticsToAt_intensity,
-	hapticsToAt_swapTriggers,
-	hapticsToAt_mode,
-	isLeftUsingDsxTrigger,
-	isRightUsingDsxTrigger,
-	leftCustomTrigger,
-	rightCustomTrigger,
-	emulatedController,
-	leftTriggerThreshold,
-	rightTriggerThreshold,
-	useRumbleFromEmulatedController,
-	useLightbarFromEmulatedController,
-	gyroToRightStick,
-	gyroToRightStickPermanent,
-	useGyroRightStickHotkey,
-	gyroToRightStickActivationButton,
-	gyroToRightStickSensitivity,
-	gyroToRightStickDeadzone,
-	emulateAnalogWsad,
-	psBtnAsWinKey,
-	leftStickDeadzone,
-	rightStickDeadzone,
-	touchpadAsMouse,
-	touchpadAsMouse_sensitivity,
-	useMouse1Hotkey,
-	mouse1Hotkey,
-	gyroToMouse,
-	gyroToMouseSensitivity,
-	triggersAsButtons,
-	triggersAsButtonStartPos,
-	TouchpadAsSelect,
-	TouchpadAsStart,
-	ShareBtnAsSelect,
-	Hidden
-);
+inline void to_json(nlohmann::json& j, const s_scePadSettings& t) {
+	j = nlohmann::json{
+		{"udpConfig", t.udpConfig},
+		{"led", t.led},
+		{"audioToLed", t.audioToLed},
+		{"brightness", t.brightness},
+		{"disablePlayerLed", t.disablePlayerLed},
+		{"discoMode", t.discoMode},
+		{"discoModeSpeed", t.discoModeSpeed},
+		{"audioPassthrough", t.audioPassthrough},
+		{"speakerVolume", t.speakerVolume},
+		{"micGain", t.micGain},
+		{"audioPath", t.audioPath},
+		{"hapticIntensity", t.hapticIntensity},
+		{"currentSonyItem", t.currentSonyItem},
+		{"currentDSXItem", t.currentDSXItem},
+		{"uiSelectedTrigger", t.uiSelectedTrigger},
+		{"uiParameters", t.uiParameters},
+		{"uiTriggerFormat", t.uiTriggerFormat},
+		{"uiSelectedSonyTriggerMode", t.uiSelectedSonyTriggerMode},
+		{"uiSelectedDSXTriggerMode", t.uiSelectedDSXTriggerMode},
+		{"xToAtFullyRetractWhenNoData", t.xToAtFullyRetractWhenNoData},
+		{"rumbleToAT", t.rumbleToAT},
+		{"rumbleToAt_intensity", t.rumbleToAt_intensity},
+		{"rumbleToAt_frequency", t.rumbleToAt_frequency},
+		{"rumbleToAt_position", t.rumbleToAt_position},
+		{"rumbleToAt_swapTriggers", t.rumbleToAt_swapTriggers},
+		{"hapticsToAt", t.hapticsToAt},
+		{"hapticsToAt_intensity", t.hapticsToAt_intensity},
+		{"hapticsToAt_swapTriggers", t.hapticsToAt_swapTriggers},
+		{"hapticsToAt_mode", t.hapticsToAt_mode},
+		{"isLeftUsingDsxTrigger", t.isLeftUsingDsxTrigger},
+		{"isRightUsingDsxTrigger", t.isRightUsingDsxTrigger},
+		{"leftCustomTrigger", t.leftCustomTrigger},
+		{"rightCustomTrigger", t.rightCustomTrigger},
+		{"emulatedController", t.emulatedController},
+		{"leftTriggerThreshold", t.leftTriggerThreshold},
+		{"rightTriggerThreshold", t.rightTriggerThreshold},
+		{"useRumbleFromEmulatedController", t.useRumbleFromEmulatedController},
+		{"useLightbarFromEmulatedController", t.useLightbarFromEmulatedController},
+		{"gyroToRightStick", t.gyroToRightStick},
+		{"gyroToRightStickPermanent", t.gyroToRightStickPermanent},
+		{"useGyroRightStickHotkey", t.useGyroRightStickHotkey},
+		{"gyroToRightStickActivationButton", t.gyroToRightStickActivationButton},
+		{"gyroToRightStickSensitivity", t.gyroToRightStickSensitivity},
+		{"gyroToRightStickDeadzone", t.gyroToRightStickDeadzone},
+		{"emulateAnalogWsad", t.emulateAnalogWsad},
+		{"psBtnAsWinKey", t.psBtnAsWinKey},
+		{"leftStickDeadzone", t.leftStickDeadzone},
+		{"rightStickDeadzone", t.rightStickDeadzone},
+		{"touchpadAsMouse", t.touchpadAsMouse},
+		{"touchpadAsMouse_sensitivity", t.touchpadAsMouse_sensitivity},
+		{"useMouse1Hotkey", t.useMouse1Hotkey},
+		{"mouse1Hotkey", t.mouse1Hotkey},
+		{"gyroToMouse", t.gyroToMouse},
+		{"gyroToMouseSensitivity", t.gyroToMouseSensitivity},
+		{"triggersAsButtons", t.triggersAsButtons},
+		{"triggersAsButtonStartPos", t.triggersAsButtonStartPos},
+		{"TouchpadAsSelect", t.TouchpadAsSelect},
+		{"TouchpadAsStart", t.TouchpadAsStart},
+		{"ShareBtnAsSelect", t.ShareBtnAsSelect},
+		{"Hidden", t.Hidden},
+		{"lowBatteryNotification", t.lowBatteryNotification},
+		{"lowBatteryThreshold", t.lowBatteryThreshold},
+		{"lowBatteryLedFlash", t.lowBatteryLedFlash}
+	};
+}
+
+template <typename T>
+inline void read_json_field(const nlohmann::json& j, const char* key, T& field, const T& default_val) {
+	if (j.contains(key) && !j[key].is_null()) {
+		try {
+			j.at(key).get_to(field);
+			return;
+		} catch (...) {}
+	}
+	field = default_val;
+}
+
+inline void from_json(const nlohmann::json& j, s_scePadSettings& t) {
+	s_scePadSettings d;
+	read_json_field(j, "udpConfig", t.udpConfig, d.udpConfig);
+	read_json_field(j, "led", t.led, d.led);
+	read_json_field(j, "audioToLed", t.audioToLed, d.audioToLed);
+	read_json_field(j, "brightness", t.brightness, d.brightness);
+	read_json_field(j, "disablePlayerLed", t.disablePlayerLed, d.disablePlayerLed);
+	read_json_field(j, "discoMode", t.discoMode, d.discoMode);
+	read_json_field(j, "discoModeSpeed", t.discoModeSpeed, d.discoModeSpeed);
+	read_json_field(j, "audioPassthrough", t.audioPassthrough, d.audioPassthrough);
+	read_json_field(j, "speakerVolume", t.speakerVolume, d.speakerVolume);
+	read_json_field(j, "micGain", t.micGain, d.micGain);
+	read_json_field(j, "audioPath", t.audioPath, d.audioPath);
+	read_json_field(j, "hapticIntensity", t.hapticIntensity, d.hapticIntensity);
+	read_json_field(j, "currentSonyItem", t.currentSonyItem, d.currentSonyItem);
+	read_json_field(j, "currentDSXItem", t.currentDSXItem, d.currentDSXItem);
+	read_json_field(j, "uiSelectedTrigger", t.uiSelectedTrigger, d.uiSelectedTrigger);
+	read_json_field(j, "uiParameters", t.uiParameters, d.uiParameters);
+	read_json_field(j, "uiTriggerFormat", t.uiTriggerFormat, d.uiTriggerFormat);
+	read_json_field(j, "uiSelectedSonyTriggerMode", t.uiSelectedSonyTriggerMode, d.uiSelectedSonyTriggerMode);
+	read_json_field(j, "uiSelectedDSXTriggerMode", t.uiSelectedDSXTriggerMode, d.uiSelectedDSXTriggerMode);
+	read_json_field(j, "xToAtFullyRetractWhenNoData", t.xToAtFullyRetractWhenNoData, d.xToAtFullyRetractWhenNoData);
+	read_json_field(j, "rumbleToAT", t.rumbleToAT, d.rumbleToAT);
+	read_json_field(j, "rumbleToAt_intensity", t.rumbleToAt_intensity, d.rumbleToAt_intensity);
+	read_json_field(j, "rumbleToAt_frequency", t.rumbleToAt_frequency, d.rumbleToAt_frequency);
+	read_json_field(j, "rumbleToAt_position", t.rumbleToAt_position, d.rumbleToAt_position);
+	read_json_field(j, "rumbleToAt_swapTriggers", t.rumbleToAt_swapTriggers, d.rumbleToAt_swapTriggers);
+	read_json_field(j, "hapticsToAt", t.hapticsToAt, d.hapticsToAt);
+	read_json_field(j, "hapticsToAt_intensity", t.hapticsToAt_intensity, d.hapticsToAt_intensity);
+	read_json_field(j, "hapticsToAt_swapTriggers", t.hapticsToAt_swapTriggers, d.hapticsToAt_swapTriggers);
+	read_json_field(j, "hapticsToAt_mode", t.hapticsToAt_mode, d.hapticsToAt_mode);
+	read_json_field(j, "isLeftUsingDsxTrigger", t.isLeftUsingDsxTrigger, d.isLeftUsingDsxTrigger);
+	read_json_field(j, "isRightUsingDsxTrigger", t.isRightUsingDsxTrigger, d.isRightUsingDsxTrigger);
+	read_json_field(j, "leftCustomTrigger", t.leftCustomTrigger, d.leftCustomTrigger);
+	read_json_field(j, "rightCustomTrigger", t.rightCustomTrigger, d.rightCustomTrigger);
+	read_json_field(j, "emulatedController", t.emulatedController, d.emulatedController);
+	read_json_field(j, "leftTriggerThreshold", t.leftTriggerThreshold, d.leftTriggerThreshold);
+	read_json_field(j, "rightTriggerThreshold", t.rightTriggerThreshold, d.rightTriggerThreshold);
+	read_json_field(j, "useRumbleFromEmulatedController", t.useRumbleFromEmulatedController, d.useRumbleFromEmulatedController);
+	read_json_field(j, "useLightbarFromEmulatedController", t.useLightbarFromEmulatedController, d.useLightbarFromEmulatedController);
+	read_json_field(j, "gyroToRightStick", t.gyroToRightStick, d.gyroToRightStick);
+	read_json_field(j, "gyroToRightStickPermanent", t.gyroToRightStickPermanent, d.gyroToRightStickPermanent);
+	read_json_field(j, "useGyroRightStickHotkey", t.useGyroRightStickHotkey, d.useGyroRightStickHotkey);
+	read_json_field(j, "gyroToRightStickActivationButton", t.gyroToRightStickActivationButton, d.gyroToRightStickActivationButton);
+	read_json_field(j, "gyroToRightStickSensitivity", t.gyroToRightStickSensitivity, d.gyroToRightStickSensitivity);
+	read_json_field(j, "gyroToRightStickDeadzone", t.gyroToRightStickDeadzone, d.gyroToRightStickDeadzone);
+	read_json_field(j, "emulateAnalogWsad", t.emulateAnalogWsad, d.emulateAnalogWsad);
+	read_json_field(j, "psBtnAsWinKey", t.psBtnAsWinKey, d.psBtnAsWinKey);
+	read_json_field(j, "leftStickDeadzone", t.leftStickDeadzone, d.leftStickDeadzone);
+	read_json_field(j, "rightStickDeadzone", t.rightStickDeadzone, d.rightStickDeadzone);
+	read_json_field(j, "touchpadAsMouse", t.touchpadAsMouse, d.touchpadAsMouse);
+	read_json_field(j, "touchpadAsMouse_sensitivity", t.touchpadAsMouse_sensitivity, d.touchpadAsMouse_sensitivity);
+	read_json_field(j, "useMouse1Hotkey", t.useMouse1Hotkey, d.useMouse1Hotkey);
+	read_json_field(j, "mouse1Hotkey", t.mouse1Hotkey, d.mouse1Hotkey);
+	read_json_field(j, "gyroToMouse", t.gyroToMouse, d.gyroToMouse);
+	read_json_field(j, "gyroToMouseSensitivity", t.gyroToMouseSensitivity, d.gyroToMouseSensitivity);
+	read_json_field(j, "triggersAsButtons", t.triggersAsButtons, d.triggersAsButtons);
+	read_json_field(j, "triggersAsButtonStartPos", t.triggersAsButtonStartPos, d.triggersAsButtonStartPos);
+	read_json_field(j, "TouchpadAsSelect", t.TouchpadAsSelect, d.TouchpadAsSelect);
+	read_json_field(j, "TouchpadAsStart", t.TouchpadAsStart, d.TouchpadAsStart);
+	read_json_field(j, "ShareBtnAsSelect", t.ShareBtnAsSelect, d.ShareBtnAsSelect);
+	read_json_field(j, "Hidden", t.Hidden, d.Hidden);
+	read_json_field(j, "lowBatteryNotification", t.lowBatteryNotification, d.lowBatteryNotification);
+	read_json_field(j, "lowBatteryThreshold", t.lowBatteryThreshold, d.lowBatteryThreshold);
+	read_json_field(j, "lowBatteryLedFlash", t.lowBatteryLedFlash, d.lowBatteryLedFlash);
+}
 
 void SaveSettingsToFile(const s_scePadSettings& s, const std::string& filepath);
 bool LoadSettingsFromFile(s_scePadSettings* s, const std::string& filepath);
