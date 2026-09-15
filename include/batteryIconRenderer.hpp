@@ -32,6 +32,7 @@ public:
     static std::string PreprocessSvg(const std::string& svg);
     static std::string SetSvgStrokeColor(std::string svg, const std::string& color);
     static std::string SetSvgFillColor(std::string svg, const std::string& color);
+    static std::string SetSvgBoltColors(std::string svg, const std::string& fillColor, const std::string& strokeColor, float strokeWidth = 1.5f);
 
     bool Init(const std::string& batteryIconsDir = "");
 

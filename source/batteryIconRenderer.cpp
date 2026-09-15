@@ -334,6 +334,63 @@ std::string BatteryIconRenderer::SetSvgFillColor(std::string svg, const std::str
     return svg;
 }
 
+std::string BatteryIconRenderer::SetSvgBoltColors(std::string svg, const std::string& fillColor, const std::string& strokeColor, float strokeWidth) {
+    // 1. Remove <style>...</style> and <defs>...</defs>
+    std::regex styleRegex(R"(<style[^>]*>[\s\S]*?<\/style>)", std::regex::icase);
+    svg = std::regex_replace(svg, styleRegex, "");
+    std::regex defsRegex(R"(<defs[^>]*>\s*<\/defs\s*>)", std::regex::icase);
+    svg = std::regex_replace(svg, defsRegex, "");
+
+    char strokeWidthBuf[32];
+    snprintf(strokeWidthBuf, sizeof(strokeWidthBuf), "%.1fpx", strokeWidth);
+
+    // 2. Format <polygon>: inner bolt with fillColor and strokeColor outline
+    std::regex polyRegex(R"(<polygon\b([^>]*?)(/?)>)");
+    std::smatch polyMatch;
+    if (std::regex_search(svg, polyMatch, polyRegex)) {
+        std::string polyAttrs = polyMatch[1].str();
+        polyAttrs = std::regex_replace(polyAttrs, std::regex(R"(class\s*=\s*["'][^"']*["'])"), "");
+        polyAttrs = std::regex_replace(polyAttrs, std::regex(R"(fill\s*=\s*["'][^"']*["'])"), "");
+        polyAttrs = std::regex_replace(polyAttrs, std::regex(R"(stroke\s*=\s*["'][^"']*["'])"), "");
+        polyAttrs = std::regex_replace(polyAttrs, std::regex(R"(stroke-width\s*=\s*["'][^"']*["'])"), "");
+        polyAttrs = std::regex_replace(polyAttrs, std::regex(R"(stroke-linejoin\s*=\s*["'][^"']*["'])"), "");
+        size_t last = polyAttrs.find_last_not_of(" \t\r\n/");
+        if (last != std::string::npos) {
+            polyAttrs = polyAttrs.substr(0, last + 1);
+        } else {
+            polyAttrs.clear();
+        }
+
+        std::string newPoly = "<polygon fill=\"" + fillColor + "\" stroke=\"" + strokeColor + 
+                              "\" stroke-width=\"" + strokeWidthBuf + "\" stroke-linejoin=\"round\" " + polyAttrs + "/>";
+        svg = std::regex_replace(svg, polyRegex, newPoly);
+    }
+
+    // 3. Format <path>: outer border ring with strokeColor fill and stroke
+    std::regex pathRegex(R"(<path\b([^>]*?)(/?)>)");
+    std::smatch pathMatch;
+    if (std::regex_search(svg, pathMatch, pathRegex)) {
+        std::string pathAttrs = pathMatch[1].str();
+        pathAttrs = std::regex_replace(pathAttrs, std::regex(R"(class\s*=\s*["'][^"']*["'])"), "");
+        pathAttrs = std::regex_replace(pathAttrs, std::regex(R"(fill\s*=\s*["'][^"']*["'])"), "");
+        pathAttrs = std::regex_replace(pathAttrs, std::regex(R"(stroke\s*=\s*["'][^"']*["'])"), "");
+        pathAttrs = std::regex_replace(pathAttrs, std::regex(R"(stroke-width\s*=\s*["'][^"']*["'])"), "");
+        pathAttrs = std::regex_replace(pathAttrs, std::regex(R"(stroke-linejoin\s*=\s*["'][^"']*["'])"), "");
+        size_t last = pathAttrs.find_last_not_of(" \t\r\n/");
+        if (last != std::string::npos) {
+            pathAttrs = pathAttrs.substr(0, last + 1);
+        } else {
+            pathAttrs.clear();
+        }
+
+        std::string newPath = "<path fill=\"" + strokeColor + "\" stroke=\"" + strokeColor + 
+                              "\" stroke-width=\"0.5px\" stroke-linejoin=\"round\" " + pathAttrs + "/>";
+        svg = std::regex_replace(svg, pathRegex, newPath);
+    }
+
+    return svg;
+}
+
 std::string BatteryIconRenderer::LoadSvg(const std::string& filename) {
     auto it = m_svgCache.find(filename);
     if (it != m_svgCache.end()) {
@@ -575,14 +632,7 @@ HICON BatteryIconRenderer::GenerateBatteryIcon(bool connected, uint8_t batteryLe
     // 3. WARSTWA 2 (Środek): Obrys pada (pad_outline-01.svg) z dynamicznym kolorem
     {
         bool isLightTheme = IsSystemLightTheme();
-        std::string outlineColor;
-        if (!connected) {
-            outlineColor = "#71717A"; // wyszarzony / przygaszony
-        } else if (isLightTheme) {
-            outlineColor = "#18181B"; // ciemny na jasny pasek
-        } else {
-            outlineColor = "#FFFFFF"; // biały na ciemny pasek
-        }
+        std::string outlineColor = isLightTheme ? "#000000" : "#FFFFFF";
 
         std::string outlineSvg = LoadSvg("pad_outline-01.svg");
         if (!outlineSvg.empty()) {
@@ -591,14 +641,15 @@ HICON BatteryIconRenderer::GenerateBatteryIcon(bool connected, uint8_t batteryLe
         }
     }
 
-    // 4. WARSTWA 3 (Wierzch): Piorun ładowania (pad_bolt-01.svg)
+    // 4. WARSTWA 3 (Wierzch): Piorun ładowania (pad_bolt-01.svg) z dwukolorowym obrysem
     if (connected && isCharging) {
         bool isLightTheme = IsSystemLightTheme();
-        std::string boltColor = isLightTheme ? "#18181B" : "#FFFFFF";
+        std::string boltFill = isLightTheme ? "#000000" : "#FFFFFF";
+        std::string boltStroke = isLightTheme ? "#FFFFFF" : "#000000";
 
         std::string boltSvg = LoadSvg("pad_bolt-01.svg");
         if (!boltSvg.empty()) {
-            boltSvg = SetSvgFillColor(boltSvg, boltColor);
+            boltSvg = SetSvgBoltColors(boltSvg, boltFill, boltStroke, 1.5f);
             DrawSvgString(boltSvg, iconSize);
         }
     }
