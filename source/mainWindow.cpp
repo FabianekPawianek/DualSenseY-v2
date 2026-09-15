@@ -194,6 +194,35 @@ bool MainWindow::MenuBar(int &currentController, s_scePadSettings &scePadSetting
 				SaveAppSettings(&m_AppSettings);
 			if (ImGui::MenuItem(cstr("DontConnectToServerOnStart"), NULL, &m_AppSettings.DontConnectToServerOnStart))
 				SaveAppSettings(&m_AppSettings);
+
+#if defined(WINDOWS) || defined(_WIN32)
+			if (ImGui::Checkbox(cstr("StartWithWindows"), &m_AppSettings.startWithWindows))
+			{
+				SetAutostartWindows(m_AppSettings.startWithWindows, m_AppSettings.startupDelayEnabled, m_AppSettings.startupDelaySeconds);
+				SaveAppSettings(&m_AppSettings);
+			}
+
+			if (m_AppSettings.startWithWindows)
+			{
+				ImGui::Indent(15.0f);
+				if (ImGui::Checkbox(cstr("StartupDelay"), &m_AppSettings.startupDelayEnabled))
+				{
+					SetAutostartWindows(m_AppSettings.startWithWindows, m_AppSettings.startupDelayEnabled, m_AppSettings.startupDelaySeconds);
+					SaveAppSettings(&m_AppSettings);
+				}
+
+				if (m_AppSettings.startupDelayEnabled)
+				{
+					ImGui::SetNextItemWidth(120.0f);
+					if (ImGui::SliderInt(cstr("StartupDelaySeconds"), &m_AppSettings.startupDelaySeconds, 5, 60, "%d s"))
+					{
+						SetAutostartWindows(m_AppSettings.startWithWindows, m_AppSettings.startupDelayEnabled, m_AppSettings.startupDelaySeconds);
+						SaveAppSettings(&m_AppSettings);
+					}
+				}
+				ImGui::Unindent(15.0f);
+			}
+#endif
 			ImGui::EndMenu();
 		}
 
@@ -1801,75 +1830,80 @@ bool MainWindow::Emulation(int currentController, s_scePadSettings &scePadSettin
 	}
 	else
 	{
+		int prevEmulatedController = scePadSettings.emulatedController;
+
 		ImGui::RadioButton(cstr("None"), &scePadSettings.emulatedController, 0);
 		ImGui::SameLine();
 		ImGui::RadioButton("Xbox 360", &scePadSettings.emulatedController, 1);
 		ImGui::SameLine();
-		ImGui::RadioButton("DualShock 4", &scePadSettings.emulatedController, 2);
-		m_Vigem.PlugControllerByIndex(currentController, scePadSettings.emulatedController);
-		std::string instanceId = scePadGetPath(g_ScePad[currentController]);
+		ImGui::RadioButton(cstr("Auto"), &scePadSettings.emulatedController, 2);
 
-		static bool lastHidHideStatus[4] = {false, false, false, false};
-			if (m_IsAdminWindows && (scePadSettings.Hidden != lastHidHideStatus[currentController]))
+		if (prevEmulatedController != scePadSettings.emulatedController)
+		{
+			m_Vigem.TriggerEmulationUpdate(currentController);
+		}
+
+		if (scePadSettings.emulatedController == (int)EmulatedController::AUTO)
+		{
+			ImGui::Spacing();
+			std::string detected = GetLastExternalProcessName();
+			std::string detectedDisplay = detected.empty() ? cstr("NoProcessDetected") : detected;
+
+			ImGui::Text("%s %s", cstr("DetectedProcess"), detectedDisplay.c_str());
+
+			bool canAdd = !detected.empty() && !IsNativeDualSenseGame(detected, scePadSettings.nativeDualSenseGames);
+
+			if (!canAdd) ImGui::BeginDisabled();
+			if (ImGui::Button(cstr("AddActiveGame")))
 			{
-				if (!scePadSettings.WasHidHideRanAfterLoad && scePadSettings.Hidden)
+				scePadSettings.nativeDualSenseGames.push_back(detected);
+				AutoSaveControllerSettings(currentController, scePadSettings);
+				m_Vigem.TriggerEmulationUpdate(currentController);
+			}
+			if (!canAdd) ImGui::EndDisabled();
+
+			if (!detected.empty() && IsNativeDualSenseGame(detected, scePadSettings.nativeDualSenseGames))
+			{
+				ImGui::SameLine();
+				ImGui::TextDisabled("(%s)", cstr("GameAlreadyInList"));
+			}
+
+			ImGui::Spacing();
+			if (ImGui::TreeNodeEx(cstr("NativeDualSenseGames"), ImGuiTreeNodeFlags_DefaultOpen))
+			{
+				int toRemove = -1;
+				for (size_t g = 0; g < scePadSettings.nativeDualSenseGames.size(); ++g)
 				{
-					std::thread([instanceId, &scePadSettings]() {
-						HideController(instanceId);
-						}).detach();
-				}
-				else if (!scePadSettings.WasHidHideRanAfterLoad && !scePadSettings.Hidden)
-				{
-					std::thread([instanceId, &scePadSettings]() {
-						UnhideController(instanceId);
-						}).detach();
+					ImGui::PushID(static_cast<int>(g));
+					ImGui::Text("%s", scePadSettings.nativeDualSenseGames[g].c_str());
+					ImGui::SameLine();
+					if (ImGui::SmallButton(cstr("RemoveGame")))
+					{
+						toRemove = static_cast<int>(g);
+					}
+					ImGui::PopID();
 				}
 
-				lastHidHideStatus[currentController] = scePadSettings.Hidden;
-				scePadSettings.WasHidHideRanAfterLoad = true;
+				if (toRemove >= 0 && toRemove < static_cast<int>(scePadSettings.nativeDualSenseGames.size()))
+				{
+					scePadSettings.nativeDualSenseGames.erase(scePadSettings.nativeDualSenseGames.begin() + toRemove);
+					AutoSaveControllerSettings(currentController, scePadSettings);
+					m_Vigem.TriggerEmulationUpdate(currentController);
+				}
+
+				ImGui::TreePop();
 			}
-		
+		}
+
+		if (!scePadSettings.WasHidHideRanAfterLoad)
+		{
+			m_Vigem.TriggerEmulationUpdate(currentController);
+			scePadSettings.WasHidHideRanAfterLoad = true;
+		}
 
 		ImGui::NewLine();
 		if (ImGui::TreeNodeEx(cstr("ControllerSettings"), ImGuiTreeNodeFlags_DefaultOpen))
 		{
-			if (ImGui::TreeNode(cstr("HideRealController")))
-			{
-				if (m_IsAdminWindows)
-				{
-					static bool isHidHideInstalled = getHidHideExecutablePath() != "" ? true : false;
-					if (isHidHideInstalled)
-					{
-						if (ImGui::Button(cstr("Hide")))
-						{
-							// thread for hiding
-							std::thread([instanceId, &scePadSettings]() {
-								HideController(instanceId);
-								scePadSettings.Hidden = true;
-							}).detach();
-						}
-						ImGui::SameLine();
-						if (ImGui::Button(cstr("Unhide")))
-						{
-							std::thread([instanceId, &scePadSettings]() {
-								UnhideController(instanceId);
-								scePadSettings.Hidden = false;
-							}).detach();
-						}
-					}
-					else
-					{
-						ImGui::TextColored(ImVec4(1, 1, 0, 1), cstr("HidHideNotInstalled"));
-						ImGui::TextLinkOpenURL(cstr("HidHideInstallLink"), "https://github.com/nefarius/HidHide/releases");
-					}
-				}
-				else
-				{
-					ImGui::TextColored(ImVec4(1, 1, 0, 1), cstr("UnavailableInNonAdminMode"));
-				}
-				ImGui::TreePop();
-			}
-
 			TreeElement_analogSticks(scePadSettings, state);
 			TreeElement_lightbar(scePadSettings);
 			TreeElement_vibration(scePadSettings);

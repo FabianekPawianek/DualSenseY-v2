@@ -2,7 +2,9 @@
 #include "log.hpp"
 #include "scePadSettings.hpp"
 #include "controllerHotkey.hpp"
+#include "utils.hpp"
 #include <cmath>
+#include <thread>
 
 int convertRange(int value, int oldMin, int oldMax, int newMin, int newMax) {
 	if (oldMin == oldMax) {
@@ -136,6 +138,9 @@ Vigem::Vigem(s_scePadSettings* scePadSettings, UDP& udp) : m_ScePadSettings(sceP
 		m_wasConnected[i] = false;
 		m_lastEmulatedController[i] = (uint32_t)EmulatedController::NONE;
 		m_lastPacketChangeTime[i] = std::chrono::steady_clock::time_point{};
+		m_lastAutoIsNative[i] = -1;
+		m_lastEffectiveHidden[i] = false;
+		m_isAutoEmulating[i] = false;
 	}
 
 	if (!m_VigemClientInitalized) {
@@ -150,6 +155,8 @@ Vigem::Vigem(s_scePadSettings* scePadSettings, UDP& udp) : m_ScePadSettings(sceP
 		m_VigemThread = std::thread(&Vigem::EmulatedControllerUpdate, this);
 		m_VigemThread.detach();
 
+		m_AutoWatcherThread = std::thread(&Vigem::AutoModeWatcher, this);
+
 		LOGI("ViGEm Client initialized");
 		m_VigemClientInitalized = true;
 	}
@@ -162,6 +169,12 @@ Vigem::~Vigem() {
 		return;
 
 	m_VigemThreadRunning = false;
+	m_WatcherTriggered.store(true);
+	m_WatcherCv.notify_all();
+
+	if (m_AutoWatcherThread.joinable()) {
+		m_AutoWatcherThread.join();
+	}
 	if (m_VigemThread.joinable()) {
 		m_VigemThread.join();
 	}
@@ -177,6 +190,13 @@ Vigem::~Vigem() {
 #endif
 }
 
+void Vigem::TriggerEmulationUpdate(int controllerIndex) {
+#ifdef WINDOWS
+	m_WatcherTriggered.store(true);
+	m_WatcherCv.notify_all();
+#endif
+}
+
 void Vigem::PlugControllerByIndex(uint32_t index, uint32_t controllerType) {
 #ifdef WINDOWS
 	if (index >= 4) return;
@@ -184,6 +204,10 @@ void Vigem::PlugControllerByIndex(uint32_t index, uint32_t controllerType) {
 
 	// If controller is physically disconnected, do not plug the virtual controller.
 	if (!m_wasConnected[index]) {
+		return;
+	}
+
+	if ((EmulatedController)controllerType == EmulatedController::AUTO) {
 		return;
 	}
 
@@ -431,20 +455,26 @@ void Vigem::EmulatedControllerUpdate() {
 			if (m_wasConnected[i] && !isConnected) {
 				m_wasConnected[i] = false;
 				UnplugControllerByIndex(i);
+				m_lastAutoIsNative[i] = -1;
 			}
 			// Edge detection: Disconnected -> Connected
 			else if (!m_wasConnected[i] && isConnected) {
 				m_wasConnected[i] = true;
-				if ((EmulatedController)settingsToUse.emulatedController != EmulatedController::NONE) {
-					PlugControllerByIndex(i, settingsToUse.emulatedController);
+				if ((EmulatedController)settingsToUse.emulatedController == EmulatedController::XBOX360) {
+					PlugControllerByIndex(i, (uint32_t)EmulatedController::XBOX360);
 				}
+				else if ((EmulatedController)settingsToUse.emulatedController == EmulatedController::DUALSHOCK4) {
+					PlugControllerByIndex(i, (uint32_t)EmulatedController::DUALSHOCK4);
+				}
+				TriggerEmulationUpdate(i);
 			}
 
 			// Update emulated controller if connected and active
 			if (isConnected && (EmulatedController)settingsToUse.emulatedController != EmulatedController::NONE) {
 				applyInputSettingsToScePadState(settingsToUse, scePadState, i);
 
-				if ((EmulatedController)settingsToUse.emulatedController == EmulatedController::XBOX360) {
+				if ((EmulatedController)settingsToUse.emulatedController == EmulatedController::XBOX360 ||
+				    ((EmulatedController)settingsToUse.emulatedController == EmulatedController::AUTO && m_isAutoEmulating[i])) {
 					Update360ByTarget(m_360[i], scePadState);
 				}
 				else if ((EmulatedController)settingsToUse.emulatedController == EmulatedController::DUALSHOCK4) {
@@ -552,5 +582,128 @@ VOID Vigem::ds4PeerNotification(PVIGEM_CLIENT Client, PVIGEM_TARGET Target, UCHA
 	data->Vibration = { LargeMotor, SmallMotor };
 	data->Lightbar = { LightbarColor.Red, LightbarColor.Green, LightbarColor.Blue };
 }
+
+void Vigem::AutoModeWatcher() {
+	while (m_VigemThreadRunning) {
+		{
+			std::unique_lock<std::mutex> lock(m_WatcherMutex);
+			m_WatcherCv.wait_for(lock, std::chrono::milliseconds(500), [this]() {
+				return !m_VigemThreadRunning || m_WatcherTriggered.load();
+			});
+			m_WatcherTriggered.store(false);
+		}
+
+		if (!m_VigemThreadRunning) break;
+
+		std::string fgProcess = GetForegroundProcessName();
+
+		for (uint32_t i = 0; i < 4; ++i) {
+			UpdateEmulationStateForController(i, fgProcess);
+		}
+	}
+}
+
+void Vigem::UpdateEmulationStateForController(uint32_t i, const std::string& currentProcess) {
+	if (i >= 4) return;
+	if (!m_ScePadSettings) return;
+
+	bool isConnected = m_wasConnected[i];
+	if (!isConnected) {
+		m_lastAutoIsNative[i] = -1;
+		return;
+	}
+
+	std::string instanceId = scePadGetPath(g_ScePad[i]);
+	auto mode = (EmulatedController)m_ScePadSettings[i].emulatedController;
+
+	if (mode == EmulatedController::NONE) {
+		m_lastAutoIsNative[i] = -1;
+		m_isAutoEmulating[i] = false;
+
+		if ((EmulatedController)m_lastEmulatedController[i] != EmulatedController::NONE) {
+			UnplugControllerByIndex(i);
+		}
+
+		if (m_lastEffectiveHidden[i] || m_ScePadSettings[i].Hidden) {
+			if (!instanceId.empty()) {
+				UnhideController(instanceId);
+			}
+			m_lastEffectiveHidden[i] = false;
+			m_ScePadSettings[i].Hidden = false;
+		}
+	}
+	else if (mode == EmulatedController::XBOX360) {
+		m_lastAutoIsNative[i] = -1;
+		m_isAutoEmulating[i] = false;
+
+		if ((EmulatedController)m_lastEmulatedController[i] != EmulatedController::XBOX360) {
+			PlugControllerByIndex(i, (uint32_t)EmulatedController::XBOX360);
+		}
+
+		if (!m_lastEffectiveHidden[i] || !m_ScePadSettings[i].Hidden) {
+			if (!instanceId.empty()) {
+				HideController(instanceId);
+			}
+			m_lastEffectiveHidden[i] = true;
+			m_ScePadSettings[i].Hidden = true;
+		}
+	}
+	else if (mode == EmulatedController::DUALSHOCK4) {
+		m_lastAutoIsNative[i] = -1;
+		m_isAutoEmulating[i] = false;
+
+		if ((EmulatedController)m_lastEmulatedController[i] != EmulatedController::DUALSHOCK4) {
+			PlugControllerByIndex(i, (uint32_t)EmulatedController::DUALSHOCK4);
+		}
+
+		if (!m_lastEffectiveHidden[i] || !m_ScePadSettings[i].Hidden) {
+			if (!instanceId.empty()) {
+				HideController(instanceId);
+			}
+			m_lastEffectiveHidden[i] = true;
+			m_ScePadSettings[i].Hidden = true;
+		}
+	}
+	else if (mode == EmulatedController::AUTO) {
+		std::string effectiveProcess = currentProcess;
+		if (IsCurrentProcess(currentProcess) || currentProcess.empty()) {
+			effectiveProcess = GetLastExternalProcessName();
+		}
+
+		bool isNativeGame = IsNativeDualSenseGame(effectiveProcess, m_ScePadSettings[i].nativeDualSenseGames);
+
+		if (isNativeGame) {
+			if (m_lastAutoIsNative[i] != 1) {
+				UnplugControllerByIndex(i);
+				if (m_lastEffectiveHidden[i] || m_ScePadSettings[i].Hidden) {
+					if (!instanceId.empty()) {
+						UnhideController(instanceId);
+					}
+					m_lastEffectiveHidden[i] = false;
+					m_ScePadSettings[i].Hidden = false;
+				}
+				m_isAutoEmulating[i] = false;
+				m_lastAutoIsNative[i] = 1;
+				LOGI("[AUTO MODE] Controller %u: Native game '%s' -> Unplugged virtual pad, unhidden physical pad", i, effectiveProcess.c_str());
+			}
+		}
+		else {
+			if (m_lastAutoIsNative[i] != 0) {
+				PlugControllerByIndex(i, (uint32_t)EmulatedController::XBOX360);
+				if (!m_lastEffectiveHidden[i] || !m_ScePadSettings[i].Hidden) {
+					if (!instanceId.empty()) {
+						HideController(instanceId);
+					}
+					m_lastEffectiveHidden[i] = true;
+					m_ScePadSettings[i].Hidden = true;
+				}
+				m_isAutoEmulating[i] = true;
+				m_lastAutoIsNative[i] = 0;
+				LOGI("[AUTO MODE] Controller %u: Non-native process '%s' -> Plugged Xbox 360, hid physical pad", i, effectiveProcess.c_str());
+			}
+		}
+	}
+}
 #endif
+
 

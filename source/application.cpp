@@ -31,6 +31,7 @@
 #include "keyboardMouseMapper.hpp"
 #include "client.hpp"
 #include "appMutex.hpp"
+#include "utils.hpp"
 
 bool isLightMode = false;
 #if !defined(__linux__) && !defined(__MACOS__)
@@ -111,7 +112,7 @@ void Application::IconifyCallback(GLFWwindow* window, int iconified) {
 	}
 }
 
-bool Application::Run(const std::string& Argument1) {
+bool Application::Run(const std::string& Argument1, bool startMinimized) {
 	// Delete update.zip if present
 	remove("update.zip");
 
@@ -156,11 +157,12 @@ bool Application::Run(const std::string& Argument1) {
 		LoadSettingsFromFile(&m_ScePadSettings[0], Argument1);
 	}
 
-	InitializeWindow();
+	bool shouldStartHidden = startMinimized || m_AppSettings.HideToTrayOnStart;
+	InitializeWindow(shouldStartHidden);
 	SetupTray();
 
 	ImGuiIO& io = ImGui::GetIO();
-	if (m_AppSettings.HideToTrayOnStart) HideWindowToTray();
+	if (shouldStartHidden) HideWindowToTray();
 	io.FontDefault = io.Fonts->Fonts[g_FontIndex[m_AppSettings.SelectedLanguage]];
 
 	// Windows
@@ -263,7 +265,7 @@ bool Application::Run(const std::string& Argument1) {
 	return true;
 }
 
-void Application::InitializeWindow() {
+void Application::InitializeWindow(bool startHidden) {
 	#ifdef LINUX
 	glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
 	#endif
@@ -273,6 +275,9 @@ void Application::InitializeWindow() {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 	glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_TRUE);
+	if (startHidden) {
+		glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+	}
 
 	m_GlfwWindow = std::unique_ptr<GLFWwindow, glfwDeleter>(glfwCreateWindow(1000, 720, "DualSenseY", nullptr, nullptr));
 
@@ -666,12 +671,15 @@ Application::~Application() {
 	// Hide the window immediately to prevent user from interacting with it while it's closing
 	glfwHideWindow(m_GlfwWindow.get());
 
-	// Unhide controllers
+	// Unhide controllers so devices are not left cloaked after closing
 #ifdef WINDOWS
-	if (IsRunningAsAdministratorWindows()) {
-		for (int i = 0; i < 4; i++)
-			UnhideController(scePadGetPath(g_ScePad[i]));
+	for (int i = 0; i < 4; i++) {
+		std::string path = scePadGetPath(g_ScePad[i]);
+		if (!path.empty()) {
+			UnhideController(path);
+		}
 	}
+	DisableHidHideCloak();
 
 	if (m_AppSettings.DisableAllBluetoothControllersOnExit) {
 		for (int i = 0; i < 4; i++)

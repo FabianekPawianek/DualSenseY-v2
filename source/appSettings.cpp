@@ -1,4 +1,5 @@
 #include "appSettings.hpp"
+#include "utils.hpp"
 #include <platform_folders.h>
 #include <filesystem>
 #include <fstream>
@@ -29,4 +30,15 @@ void LoadAppSettings(AppSettings* appSettings) {
 	catch (...) {
 		LOGE("Failed to load application config file");
 	}
+
+#if defined(WINDOWS) || defined(_WIN32)
+	bool regEnabled = false;
+	bool regDelayEnabled = false;
+	int regDelaySeconds = 15;
+	if (GetAutostartWindows(regEnabled, regDelayEnabled, regDelaySeconds)) {
+		appSettings->startWithWindows = regEnabled;
+		appSettings->startupDelayEnabled = regDelayEnabled;
+		appSettings->startupDelaySeconds = regDelaySeconds;
+	}
+#endif
 }

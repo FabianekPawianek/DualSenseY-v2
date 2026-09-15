@@ -1,5 +1,6 @@
 #include "utils.hpp"
 #include <algorithm>
+#include <mutex>
 #include "log.hpp"
 #ifdef WINDOWS
 #include <Windows.h>
@@ -20,21 +21,31 @@ static std::wstring Utf8ToWstring(const std::string& str)
 }
 
 std::string GetDeviceInstancePath(const std::string& lastPath) {
-    // Remove prefix "\\?\" 
+    if (lastPath.empty()) return "";
+
     std::string path = lastPath;
 
-    if (path.compare(0, 4, "\\\\?\\") == 0) {
+    // Remove prefix "\\?\" or "\\.\"
+    if (path.compare(0, 4, "\\\\?\\") == 0 || path.compare(0, 4, "\\\\.\\") == 0) {
         path.erase(0, 4);
     }
 
 	// Look for last GUID (starts with '{' ) because BT devices have in-between GUID
-    size_t lastGuidPos = path.rfind("#{");
-    if (lastGuidPos != std::string::npos) {
-        path.erase(lastGuidPos);
+    size_t lastHashGuid = path.rfind("#{");
+    if (lastHashGuid != std::string::npos) {
+        path.erase(lastHashGuid);
+    } else {
+        size_t lastSlashGuid = path.rfind("\\{");
+        if (lastSlashGuid != std::string::npos && path.back() == '}' && (path.length() - lastSlashGuid) <= 40) {
+            path.erase(lastSlashGuid);
+        }
     }
 
     // Replace '#' with '\' for HID format
     std::replace(path.begin(), path.end(), '#', '\\');
+
+    // Convert to uppercase (standard HID\VID_054C&PID_0CE6\... or USB\VID_...)
+    std::transform(path.begin(), path.end(), path.begin(), ::toupper);
 
     return path;
 }
@@ -58,7 +69,7 @@ bool ReplugDevice(const std::wstring& instanceId)
     }
 
     CM_Disable_DevNode(devInst, 0);
-    Sleep(2000);
+    Sleep(200);
     CM_Enable_DevNode(devInst, 0);
 #endif
 
@@ -133,47 +144,56 @@ std::string getHidHideExecutablePath() {
 #endif
 }
 
-void hidHideRequest(std::string ID, std::string arg) {
+void HidHideRequest(std::string ID, std::string arg) {
 #ifdef WINDOWS
-    STARTUPINFO si;
-    PROCESS_INFORMATION pi;
-
-    ZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE;
-
-    ZeroMemory(&pi, sizeof(pi));
+    if (ID.empty()) {
+        return;
+    }
 
     // Get HidHide executable path
     std::string hidHideExePath = getHidHideExecutablePath();
-    
     if (hidHideExePath.empty()) {
         LOGE("HidHide executable not found. Controller hiding feature is disabled.");
+        return;
+    }
+
+    std::string hidDeviceInstancePath = GetDeviceInstancePath(ID);
+    if (hidDeviceInstancePath.empty()) {
         return;
     }
 
     // Build command based on the requested action
     std::string command = "\"" + hidHideExePath + "\"";
 
-    std::string hidDeviceInstancePath = GetDeviceInstancePath(ID);
-    
     if (arg == "hide") {
+        // Ensure application is registered before hiding so DualSenseY doesn't lose access
+        RegisterApplicationWithHidHide();
         command += " --cloak-on --dev-hide \"" + hidDeviceInstancePath + "\"";
-        LOGI("Executing HidHide: hide device %s", hidDeviceInstancePath);
+        LOGI("Executing HidHide: hide device %s", hidDeviceInstancePath.c_str());
     }
     else if (arg == "show") {
-        command += " --cloak-off --dev-unhide \"" + hidDeviceInstancePath + "\"";
-        LOGI("Executing HidHide: unhide device %s", hidDeviceInstancePath);
+        command += " --dev-unhide \"" + hidDeviceInstancePath + "\" --cloak-off";
+        LOGI("Executing HidHide: unhide device %s and disable cloak", hidDeviceInstancePath.c_str());
     }
     else {
-        LOGE("Invalid argument for hidHideRequest. Only 'hide' and 'show' are supported.");
+        LOGE("Invalid argument for HidHideRequest. Only 'hide' and 'show' are supported.");
         return;
     }
 
+    STARTUPINFO si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    ZeroMemory(&pi, sizeof(pi));
+
+    std::vector<char> cmdBuffer(command.begin(), command.end());
+    cmdBuffer.push_back('\0');
+
     // Execute the HidHide CLI command
-    if (CreateProcess(NULL,
-        (LPSTR)command.c_str(),
+    if (CreateProcessA(NULL,
+        cmdBuffer.data(),
         NULL,
         NULL,
         FALSE,
@@ -191,7 +211,6 @@ void hidHideRequest(std::string ID, std::string arg) {
         
         if (exitCode == 0) {
             LOGI("HidHide command completed successfully");
-            ReplugDevice(Utf8ToWstring(hidDeviceInstancePath));
         } else {
             LOGE("HidHide command failed with exit code: %lu", static_cast<unsigned long>(exitCode));
         }
@@ -202,6 +221,46 @@ void hidHideRequest(std::string ID, std::string arg) {
     }
     else {
         LOGE("Failed to execute HidHide command. Error: %lu", static_cast<unsigned long>(GetLastError()));
+    }
+#endif
+}
+
+void hidHideRequest(std::string ID, std::string arg) {
+    HidHideRequest(ID, arg);
+}
+
+void DisableHidHideCloak() {
+#ifdef WINDOWS
+    std::string hidHideExePath = getHidHideExecutablePath();
+    if (hidHideExePath.empty()) return;
+
+    std::string command = "\"" + hidHideExePath + "\" --cloak-off";
+
+    STARTUPINFO si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    ZeroMemory(&pi, sizeof(pi));
+
+    std::vector<char> cmdBuffer(command.begin(), command.end());
+    cmdBuffer.push_back('\0');
+
+    if (CreateProcessA(NULL,
+        cmdBuffer.data(),
+        NULL,
+        NULL,
+        FALSE,
+        0,
+        NULL,
+        NULL,
+        &si,
+        &pi)) {
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        LOGI("HidHide cloaking disabled globally");
     }
 #endif
 }
@@ -259,8 +318,11 @@ void RegisterApplicationWithHidHide() {
     // Build command to register this application: HidHideCLI.exe --app-reg "<app_path>"
     std::string command = "\"" + hidHideExePath + "\" --app-reg \"" + appPath + "\"";
 
-    if (CreateProcess(NULL,
-        (LPSTR)command.c_str(),
+    std::vector<char> cmdBuffer(command.begin(), command.end());
+    cmdBuffer.push_back('\0');
+
+    if (CreateProcessA(NULL,
+        cmdBuffer.data(),
         NULL,
         NULL,
         FALSE,
@@ -291,18 +353,7 @@ void RegisterApplicationWithHidHide() {
 }
 
 std::string USBtoHIDinstance(const std::string& input) {
-    std::string result = input;
-
-    // Replace "USB" with "HID"
-    size_t pos = result.find("USB");
-    if (pos != std::string::npos) {
-        result.replace(pos, 3, "HID");
-    }
-
-    // Convert the string to uppercase
-    std::transform(result.begin(), result.end(), result.begin(), ::toupper);
-
-    return result;
+    return GetDeviceInstancePath(input);
 }
 
 void HideController(const std::string& instanceId) {
@@ -394,3 +445,179 @@ void DisableBluetoothDevice(const std::string& Address) {
     }
 #endif
 }
+
+bool SetAutostartWindows(bool enable, bool delayEnabled, int delaySeconds) {
+#ifdef WINDOWS
+    HKEY hKey = NULL;
+    LONG result = RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_SET_VALUE, &hKey);
+    if (result != ERROR_SUCCESS) {
+        LOGE("Failed to open Run registry key: %ld", result);
+        return false;
+    }
+
+    if (enable) {
+        std::string exePath = getCurrentExecutablePath();
+        if (exePath.empty()) {
+            RegCloseKey(hKey);
+            return false;
+        }
+
+        std::string cmd = "\"" + exePath + "\" --minimized";
+        if (delayEnabled && delaySeconds > 0) {
+            cmd += " --delay " + std::to_string(delaySeconds);
+        }
+
+        result = RegSetValueExA(hKey, "DualSenseY", 0, REG_SZ, (const BYTE*)cmd.c_str(), static_cast<DWORD>(cmd.length() + 1));
+        RegCloseKey(hKey);
+
+        if (result != ERROR_SUCCESS) {
+            LOGE("Failed to set DualSenseY autostart registry value: %ld", result);
+            return false;
+        }
+        LOGI("DualSenseY autostart enabled: %s", cmd.c_str());
+        return true;
+    } else {
+        result = RegDeleteValueA(hKey, "DualSenseY");
+        RegCloseKey(hKey);
+
+        if (result != ERROR_SUCCESS && result != ERROR_FILE_NOT_FOUND) {
+            LOGE("Failed to delete DualSenseY autostart registry value: %ld", result);
+            return false;
+        }
+        LOGI("DualSenseY autostart disabled");
+        return true;
+    }
+#else
+    return false;
+#endif
+}
+
+bool GetAutostartWindows(bool& outEnabled, bool& outDelayEnabled, int& outDelaySeconds) {
+#ifdef WINDOWS
+    HKEY hKey = NULL;
+    LONG result = RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_READ, &hKey);
+    if (result != ERROR_SUCCESS) {
+        outEnabled = false;
+        return false;
+    }
+
+    char buffer[1024] = {0};
+    DWORD size = sizeof(buffer);
+    result = RegQueryValueExA(hKey, "DualSenseY", NULL, NULL, (LPBYTE)buffer, &size);
+    RegCloseKey(hKey);
+
+    if (result != ERROR_SUCCESS) {
+        outEnabled = false;
+        return false;
+    }
+
+    outEnabled = true;
+    std::string cmd(buffer);
+    size_t delayPos = cmd.find("--delay");
+    if (delayPos != std::string::npos) {
+        outDelayEnabled = true;
+        try {
+            std::string sub = cmd.substr(delayPos + 7);
+            size_t start = sub.find_first_not_of(" = \t");
+            if (start != std::string::npos) {
+                outDelaySeconds = std::clamp(std::stoi(sub.substr(start)), 5, 60);
+            } else {
+                outDelaySeconds = 15;
+            }
+        } catch (...) {
+            outDelaySeconds = 15;
+        }
+    } else {
+        outDelayEnabled = false;
+        outDelaySeconds = 15;
+    }
+    return true;
+#else
+    outEnabled = false;
+    return false;
+#endif
+}
+
+#ifdef WINDOWS
+static std::string g_LastExternalProcess = "";
+static std::mutex g_ProcessMutex;
+
+std::string GetForegroundProcessName() {
+    HWND hwnd = GetForegroundWindow();
+    if (!hwnd) return "";
+
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (pid == 0) return "";
+
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProcess) return "";
+
+    char pathBuffer[MAX_PATH] = { 0 };
+    DWORD size = MAX_PATH;
+    std::string exeName = "";
+    if (QueryFullProcessImageNameA(hProcess, 0, pathBuffer, &size)) {
+        std::string fullPath(pathBuffer);
+        size_t lastSlash = fullPath.find_last_of("\\/");
+        if (lastSlash != std::string::npos) {
+            exeName = fullPath.substr(lastSlash + 1);
+        } else {
+            exeName = fullPath;
+        }
+    }
+    CloseHandle(hProcess);
+
+    if (pid != GetCurrentProcessId() && !exeName.empty()) {
+        std::lock_guard<std::mutex> lock(g_ProcessMutex);
+        g_LastExternalProcess = exeName;
+    }
+
+    return exeName;
+}
+
+std::string GetLastExternalProcessName() {
+    std::lock_guard<std::mutex> lock(g_ProcessMutex);
+    return g_LastExternalProcess;
+}
+
+bool IsCurrentProcess(const std::string& processName) {
+    if (processName.empty()) return false;
+    std::string appPath = getCurrentExecutablePath();
+    if (appPath.empty()) return false;
+    size_t lastSlash = appPath.find_last_of("\\/");
+    std::string currentExe = (lastSlash != std::string::npos) ? appPath.substr(lastSlash + 1) : appPath;
+    if (processName.length() != currentExe.length()) return false;
+    for (size_t i = 0; i < processName.length(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(processName[i])) !=
+            std::tolower(static_cast<unsigned char>(currentExe[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool IsNativeDualSenseGame(const std::string& processName, const std::vector<std::string>& gamesList) {
+    if (processName.empty()) return false;
+    for (const auto& game : gamesList) {
+        if (game.length() == processName.length()) {
+            bool match = true;
+            for (size_t i = 0; i < game.length(); ++i) {
+                if (std::tolower(static_cast<unsigned char>(game[i])) !=
+                    std::tolower(static_cast<unsigned char>(processName[i]))) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) return true;
+        }
+    }
+    return false;
+}
+#else
+std::string GetForegroundProcessName() { return ""; }
+std::string GetLastExternalProcessName() { return ""; }
+bool IsCurrentProcess(const std::string& processName) { return false; }
+bool IsNativeDualSenseGame(const std::string& processName, const std::vector<std::string>& gamesList) { return false; }
+#endif
+
+

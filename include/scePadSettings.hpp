@@ -86,9 +86,10 @@ inline uint32_t scaleFloatToInt(float input_float, float max_float) {
 }
 
 enum class EmulatedController {
-	NONE,
-	XBOX360,
-	DUALSHOCK4
+	NONE = 0,
+	XBOX360 = 1,
+	AUTO = 2,
+	DUALSHOCK4 = 3
 };
 
 struct s_scePadSettings {
@@ -186,6 +187,9 @@ struct s_scePadSettings {
 	bool Hidden = false;
 	bool WasHidHideRanAfterLoad = true; // When config is loaded, set to false. Set to true after HidHide is ran once.
 
+	// Auto mode native DualSense games
+	std::vector<std::string> nativeDualSenseGames = {};
+
 	// Battery
 	bool lowBatteryNotification = true;
 	int lowBatteryThreshold = 10;
@@ -278,6 +282,7 @@ inline void to_json(nlohmann::json& j, const s_scePadSettings& t) {
 		{"TouchpadAsStart", t.TouchpadAsStart},
 		{"ShareBtnAsSelect", t.ShareBtnAsSelect},
 		{"Hidden", t.Hidden},
+		{"nativeDualSenseGames", t.nativeDualSenseGames},
 		{"lowBatteryNotification", t.lowBatteryNotification},
 		{"lowBatteryThreshold", t.lowBatteryThreshold},
 		{"lowBatteryLedFlash", t.lowBatteryLedFlash}
@@ -357,6 +362,7 @@ inline void from_json(const nlohmann::json& j, s_scePadSettings& t) {
 	read_json_field(j, "TouchpadAsStart", t.TouchpadAsStart, d.TouchpadAsStart);
 	read_json_field(j, "ShareBtnAsSelect", t.ShareBtnAsSelect, d.ShareBtnAsSelect);
 	read_json_field(j, "Hidden", t.Hidden, d.Hidden);
+	read_json_field(j, "nativeDualSenseGames", t.nativeDualSenseGames, d.nativeDualSenseGames);
 	read_json_field(j, "lowBatteryNotification", t.lowBatteryNotification, d.lowBatteryNotification);
 	read_json_field(j, "lowBatteryThreshold", t.lowBatteryThreshold, d.lowBatteryThreshold);
 	read_json_field(j, "lowBatteryLedFlash", t.lowBatteryLedFlash, d.lowBatteryLedFlash);
@@ -371,6 +377,7 @@ void ForceControllerToNotLoadDefault(int controller);
 std::string ScePadSettingsToString(s_scePadSettings* s);
 bool LoadSettingsFromString(s_scePadSettings* s, const std::string& String);
 bool SaveSettingsFromString(const std::string& String, const std::string& Path);
+void AutoSaveControllerSettings(int controllerIndex, const s_scePadSettings& s);
 
 using TriggerHandler = std::function<void(s_scePadSettings&, int&, std::vector<uint8_t>&)>;
 

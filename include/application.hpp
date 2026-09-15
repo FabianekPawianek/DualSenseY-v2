@@ -69,8 +69,8 @@ public:
 	#endif
 	}
 	
-	bool Run(const std::string& Argument1 = "");
-	void InitializeWindow();
+	bool Run(const std::string& Argument1 = "", bool startMinimized = false);
+	void InitializeWindow(bool startHidden = false);
 	void SetStyleAndColors();
 	void SetupTray();
 	void HideWindowToTray();

@@ -19,6 +19,7 @@
 #include <atomic>
 #include <thread>
 #include <mutex>
+#include <condition_variable>
 #include "udp.hpp"
 #include <client.hpp>
 #include <unordered_map>
@@ -67,6 +68,17 @@ private:
    uint8_t m_lastR2[4] = {};
    s_SceFVector3 m_lastAccel[4] = {};
    s_SceFVector3 m_lastGyro[4] = {};
+
+   std::thread m_AutoWatcherThread;
+   std::condition_variable m_WatcherCv;
+   std::mutex m_WatcherMutex;
+   std::atomic<bool> m_WatcherTriggered = false;
+   int m_lastAutoIsNative[4] = { -1, -1, -1, -1 };
+   bool m_lastEffectiveHidden[4] = { false, false, false, false };
+   std::atomic<bool> m_isAutoEmulating[4] = { false, false, false, false };
+
+   void AutoModeWatcher();
+   void UpdateEmulationStateForController(uint32_t i, const std::string& currentProcess);
 #endif
 
    void applyInputSettingsToScePadState(s_scePadSettings& settings, s_ScePadData& state, int controllerIndex = -1);
@@ -81,6 +93,7 @@ public:
    bool IsVigemConnected(); 
    void SetSelectedController(uint32_t selectedController);
    void SetPeerControllerDataPointer(std::shared_ptr<std::unordered_map<uint32_t, PeerControllerData>> Pointer);
+   void TriggerEmulationUpdate(int controllerIndex = -1);
 };
 
 #endif // CONTROLLEREMULATION_H

@@ -128,6 +128,34 @@ bool SaveSettingsFromString(const std::string &String, const std::string &Path)
 	}
 }
 
+void AutoSaveControllerSettings(int controllerIndex, const s_scePadSettings& s)
+{
+	if (controllerIndex >= 0 && controllerIndex < 4)
+	{
+		std::string macAddress = scePadGetMacAddress(g_ScePad[controllerIndex]);
+		if (!macAddress.empty())
+		{
+			std::string cleanMac = macAddress;
+			cleanMac.erase(std::remove(cleanMac.begin(), cleanMac.end(), ':'), cleanMac.end());
+			std::filesystem::path filePath = std::filesystem::path(sago::getDocumentsFolder() + "/DSY/DefaultConfigs/" + cleanMac);
+			if (std::filesystem::exists(filePath))
+			{
+				std::ifstream file(filePath);
+				std::string configPath = "";
+				file >> configPath;
+				file.close();
+				if (!configPath.empty())
+				{
+					SaveSettingsToFile(s, configPath);
+					return;
+				}
+			}
+		}
+	}
+	std::string defaultPath = sago::getDocumentsFolder() + "/DSY/Config.dsy";
+	SaveSettingsToFile(s, defaultPath);
+}
+
 void applySettings(uint32_t index, s_scePadSettings settings, AudioPassthrough &audio)
 {
 	auto now = std::chrono::steady_clock::now();

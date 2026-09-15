@@ -1,4 +1,4 @@
-﻿#ifndef APPSETTINGS_H
+#ifndef APPSETTINGS_H
 #define APPSETTINGS_H
 
 #include <nlohmann/json.hpp>
@@ -50,6 +50,9 @@ struct AppSettings {
 	std::string ServerAddress = "maluch.mikr.us";
 	uint16_t ServerPort = 30151;
 	uint16_t LocalPort = 6969;
+	bool startWithWindows = false;
+	bool startupDelayEnabled = false;
+	int startupDelaySeconds = 15;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
@@ -61,7 +64,10 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	HideToTrayOnStart,
 	ServerAddress,
 	ServerPort,
-	LocalPort
+	LocalPort,
+	startWithWindows,
+	startupDelayEnabled,
+	startupDelaySeconds
 );
 
 void SaveAppSettings(AppSettings* appSettings);
