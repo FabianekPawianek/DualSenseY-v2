@@ -225,56 +225,59 @@ bool MainWindow::MenuBar(int &currentController, s_scePadSettings &scePadSetting
 
 bool MainWindow::Controllers(int &currentController, s_scePadSettings &scePadSettings, float scale)
 {
-	ImGui::SeparatorText(cstr("Controller"));
+	int connectedCount = 0;
+	int singleConnectedIndex = -1;
+	bool isConnected[4] = { false, false, false, false };
 
-	bool noneConnected = true;
 	for (uint32_t i = 0; i < 4; i++)
 	{
 		s_ScePadData data = {};
 		int result = scePadReadState(g_ScePad[i], &data);
 		if (result == SCE_OK && data.connected)
 		{
-			noneConnected = false;
-			ImGui::RadioButton(std::to_string(i + 1).c_str(), &currentController, i);
-			ImGui::SameLine();
+			isConnected[i] = true;
+			connectedCount++;
+			singleConnectedIndex = i;
 		}
 	}
 
-	if (noneConnected)
+	if (connectedCount == 0)
 	{
+		ImGui::SeparatorText(cstr("Controller"));
 		ImGui::TextColored(ImVec4(1, 0, 0, 1), cstr("NoControllersConnected"));
 		return false;
 	}
 
-	s_ScePadData curData = {};
-	if (scePadReadState(g_ScePad[currentController], &curData) == SCE_OK && curData.connected)
+	if (connectedCount == 1)
 	{
-		ImGui::SameLine();
-		ImGui::Text("|");
-		ImGui::SameLine();
-		ImGui::Text("%s:", cstr("Battery"));
-		ImGui::SameLine();
-
-		ImVec4 battColor;
-		if (curData.batteryLevel > 50)
-		{
-			battColor = ImVec4(0.2f, 1.0f, 0.2f, 1.0f);
-		}
-		else if (curData.batteryLevel >= 20)
-		{
-			battColor = ImVec4(1.0f, 0.65f, 0.0f, 1.0f);
-		}
-		else
-		{
-			battColor = ImVec4(1.0f, 0.25f, 0.25f, 1.0f);
-		}
-
-		std::string battText = std::to_string(curData.batteryLevel) + "%";
-		std::string statusText = curData.isCharging ? std::string(" [") + strr("Charging") + "]" : std::string(" [") + strr("Discharging") + "]";
-		ImGui::TextColored(battColor, "%s%s", battText.c_str(), statusText.c_str());
+		currentController = singleConnectedIndex;
+		return true;
 	}
 
+	// Multiple controllers connected (connectedCount > 1)
+	if (!isConnected[currentController])
+	{
+		for (int i = 0; i < 4; i++)
+		{
+			if (isConnected[i])
+			{
+				currentController = i;
+				break;
+			}
+		}
+	}
+
+	ImGui::SeparatorText(cstr("Controller"));
+	for (uint32_t i = 0; i < 4; i++)
+	{
+		if (isConnected[i])
+		{
+			ImGui::RadioButton(std::to_string(i + 1).c_str(), &currentController, i);
+			ImGui::SameLine();
+		}
+	}
 	ImGui::NewLine();
+
 	return true;
 }
 
