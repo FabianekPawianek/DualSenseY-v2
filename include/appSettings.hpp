@@ -53,6 +53,7 @@ struct AppSettings {
 	bool startWithWindows = false;
 	bool startupDelayEnabled = false;
 	int startupDelaySeconds = 15;
+	bool startAsAdmin = true;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
@@ -67,7 +68,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	LocalPort,
 	startWithWindows,
 	startupDelayEnabled,
-	startupDelaySeconds
+	startupDelaySeconds,
+	startAsAdmin
 );
 
 void SaveAppSettings(AppSettings* appSettings);

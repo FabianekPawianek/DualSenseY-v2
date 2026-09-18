@@ -198,16 +198,22 @@ bool MainWindow::MenuBar(int &currentController, s_scePadSettings &scePadSetting
 #if defined(WINDOWS) || defined(_WIN32)
 			if (ImGui::Checkbox(cstr("StartWithWindows"), &m_AppSettings.startWithWindows))
 			{
-				SetAutostartWindows(m_AppSettings.startWithWindows, m_AppSettings.startupDelayEnabled, m_AppSettings.startupDelaySeconds);
+				SetAutostartWindows(m_AppSettings.startWithWindows, m_AppSettings.startupDelayEnabled, m_AppSettings.startupDelaySeconds, m_AppSettings.startAsAdmin);
 				SaveAppSettings(&m_AppSettings);
 			}
 
 			if (m_AppSettings.startWithWindows)
 			{
 				ImGui::Indent(15.0f);
+				if (ImGui::Checkbox(cstr("RunAsAdminAutostart"), &m_AppSettings.startAsAdmin))
+				{
+					SetAutostartWindows(m_AppSettings.startWithWindows, m_AppSettings.startupDelayEnabled, m_AppSettings.startupDelaySeconds, m_AppSettings.startAsAdmin);
+					SaveAppSettings(&m_AppSettings);
+				}
+
 				if (ImGui::Checkbox(cstr("StartupDelay"), &m_AppSettings.startupDelayEnabled))
 				{
-					SetAutostartWindows(m_AppSettings.startWithWindows, m_AppSettings.startupDelayEnabled, m_AppSettings.startupDelaySeconds);
+					SetAutostartWindows(m_AppSettings.startWithWindows, m_AppSettings.startupDelayEnabled, m_AppSettings.startupDelaySeconds, m_AppSettings.startAsAdmin);
 					SaveAppSettings(&m_AppSettings);
 				}
 
@@ -216,7 +222,7 @@ bool MainWindow::MenuBar(int &currentController, s_scePadSettings &scePadSetting
 					ImGui::SetNextItemWidth(120.0f);
 					if (ImGui::SliderInt(cstr("StartupDelaySeconds"), &m_AppSettings.startupDelaySeconds, 5, 60, "%d s"))
 					{
-						SetAutostartWindows(m_AppSettings.startWithWindows, m_AppSettings.startupDelayEnabled, m_AppSettings.startupDelaySeconds);
+						SetAutostartWindows(m_AppSettings.startWithWindows, m_AppSettings.startupDelayEnabled, m_AppSettings.startupDelaySeconds, m_AppSettings.startAsAdmin);
 						SaveAppSettings(&m_AppSettings);
 					}
 				}

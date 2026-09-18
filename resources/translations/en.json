@@ -181,6 +181,7 @@
   "LowBatteryWarningMsg": "Controller battery is low (%d%%)! Please connect charger.",
   "Disconnected": "Disconnected",
   "StartWithWindows": "Start with Windows",
+  "RunAsAdminAutostart": "Run as administrator (Task Scheduler)",
   "StartupDelay": "Delay startup",
   "StartupDelaySeconds": "Startup delay",
   "Auto": "Auto",

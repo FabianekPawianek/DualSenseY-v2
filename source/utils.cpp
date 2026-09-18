@@ -446,44 +446,152 @@ void DisableBluetoothDevice(const std::string& Address) {
 #endif
 }
 
-bool SetAutostartWindows(bool enable, bool delayEnabled, int delaySeconds) {
 #ifdef WINDOWS
-    HKEY hKey = NULL;
-    LONG result = RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_SET_VALUE, &hKey);
-    if (result != ERROR_SUCCESS) {
-        LOGE("Failed to open Run registry key: %ld", result);
+static bool RunHiddenCommand(const std::string& command, DWORD* outExitCode = nullptr) {
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    ZeroMemory(&pi, sizeof(pi));
+
+    std::vector<char> cmdBuffer(command.begin(), command.end());
+    cmdBuffer.push_back('\0');
+
+    if (!CreateProcessA(NULL, cmdBuffer.data(), NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        LOGE("Failed to execute command: %s (Error: %lu)", command.c_str(), static_cast<unsigned long>(GetLastError()));
         return false;
     }
 
+    WaitForSingleObject(pi.hProcess, 5000);
+    DWORD exitCode = 0;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    if (outExitCode) *outExitCode = exitCode;
+    return (exitCode == 0);
+}
+
+static bool RunHiddenCommandWithOutput(const std::string& command, std::string& outOutput, DWORD* outExitCode = nullptr) {
+    HANDLE hReadPipe = NULL;
+    HANDLE hWritePipe = NULL;
+    SECURITY_ATTRIBUTES sa;
+    sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = NULL;
+
+    if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
+        return false;
+    }
+    SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
+
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
+    si.wShowWindow = SW_HIDE;
+    si.hStdOutput = hWritePipe;
+    si.hStdError = hWritePipe;
+    ZeroMemory(&pi, sizeof(pi));
+
+    std::vector<char> cmdBuffer(command.begin(), command.end());
+    cmdBuffer.push_back('\0');
+
+    if (!CreateProcessA(NULL, cmdBuffer.data(), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        CloseHandle(hReadPipe);
+        CloseHandle(hWritePipe);
+        return false;
+    }
+
+    CloseHandle(hWritePipe);
+
+    char buffer[1024];
+    DWORD bytesRead = 0;
+    outOutput.clear();
+    while (ReadFile(hReadPipe, buffer, sizeof(buffer) - 1, &bytesRead, NULL) && bytesRead > 0) {
+        buffer[bytesRead] = '\0';
+        outOutput.append(buffer, bytesRead);
+    }
+    CloseHandle(hReadPipe);
+
+    WaitForSingleObject(pi.hProcess, 5000);
+    DWORD exitCode = 0;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    if (outExitCode) *outExitCode = exitCode;
+    return (exitCode == 0);
+}
+#endif
+
+bool SetAutostartWindows(bool enable, bool delayEnabled, int delaySeconds, bool startAsAdmin) {
+#ifdef WINDOWS
     if (enable) {
         std::string exePath = getCurrentExecutablePath();
         if (exePath.empty()) {
-            RegCloseKey(hKey);
+            LOGE("Cannot determine executable path for autostart");
             return false;
         }
 
-        std::string cmd = "\"" + exePath + "\" --minimized";
+        std::string args = " --minimized";
         if (delayEnabled && delaySeconds > 0) {
-            cmd += " --delay " + std::to_string(delaySeconds);
+            args += " --delay " + std::to_string(delaySeconds);
         }
 
-        result = RegSetValueExA(hKey, "DualSenseY", 0, REG_SZ, (const BYTE*)cmd.c_str(), static_cast<DWORD>(cmd.length() + 1));
-        RegCloseKey(hKey);
+        if (startAsAdmin) {
+            // 1. Remove registry entry if exists to prevent duplicate launch
+            HKEY hKey = NULL;
+            if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
+                RegDeleteValueA(hKey, "DualSenseY");
+                RegCloseKey(hKey);
+            }
 
-        if (result != ERROR_SUCCESS) {
-            LOGE("Failed to set DualSenseY autostart registry value: %ld", result);
-            return false;
+            // 2. Create Task Scheduler task with HIGHEST privileges
+            std::string createCmd = "schtasks.exe /Create /TN \"DualSenseY\" /TR \"\\\"" + exePath + "\\\"" + args + "\" /SC ONLOGON /RL HIGHEST /F";
+            DWORD exitCode = 0;
+            bool ok = RunHiddenCommand(createCmd, &exitCode);
+            if (!ok || exitCode != 0) {
+                LOGE("Failed to create scheduled task for DualSenseY. Exit code: %lu", static_cast<unsigned long>(exitCode));
+                return false;
+            }
+            LOGI("DualSenseY scheduled task autostart enabled (Admin): %s%s", exePath.c_str(), args.c_str());
+            return true;
+        } else {
+            // 1. Remove Task Scheduler task if exists
+            RunHiddenCommand("schtasks.exe /Delete /TN \"DualSenseY\" /F");
+
+            // 2. Add entry to Registry Run key
+            HKEY hKey = NULL;
+            LONG result = RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_SET_VALUE, &hKey);
+            if (result != ERROR_SUCCESS) {
+                LOGE("Failed to open Run registry key: %ld", result);
+                return false;
+            }
+
+            std::string cmd = "\"" + exePath + "\"" + args;
+            result = RegSetValueExA(hKey, "DualSenseY", 0, REG_SZ, (const BYTE*)cmd.c_str(), static_cast<DWORD>(cmd.length() + 1));
+            RegCloseKey(hKey);
+
+            if (result != ERROR_SUCCESS) {
+                LOGE("Failed to set DualSenseY autostart registry value: %ld", result);
+                return false;
+            }
+            LOGI("DualSenseY autostart enabled in registry: %s", cmd.c_str());
+            return true;
         }
-        LOGI("DualSenseY autostart enabled: %s", cmd.c_str());
-        return true;
     } else {
-        result = RegDeleteValueA(hKey, "DualSenseY");
-        RegCloseKey(hKey);
-
-        if (result != ERROR_SUCCESS && result != ERROR_FILE_NOT_FOUND) {
-            LOGE("Failed to delete DualSenseY autostart registry value: %ld", result);
-            return false;
+        // Disable autostart: clean both Task Scheduler and Registry
+        HKEY hKey = NULL;
+        if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
+            RegDeleteValueA(hKey, "DualSenseY");
+            RegCloseKey(hKey);
         }
+
+        RunHiddenCommand("schtasks.exe /Delete /TN \"DualSenseY\" /F");
         LOGI("DualSenseY autostart disabled");
         return true;
     }
@@ -492,50 +600,84 @@ bool SetAutostartWindows(bool enable, bool delayEnabled, int delaySeconds) {
 #endif
 }
 
-bool GetAutostartWindows(bool& outEnabled, bool& outDelayEnabled, int& outDelaySeconds) {
+bool GetAutostartWindows(bool& outEnabled, bool& outDelayEnabled, int& outDelaySeconds, bool& outStartAsAdmin) {
 #ifdef WINDOWS
-    HKEY hKey = NULL;
-    LONG result = RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_READ, &hKey);
-    if (result != ERROR_SUCCESS) {
-        outEnabled = false;
-        return false;
-    }
+    outEnabled = false;
+    outDelayEnabled = false;
+    outDelaySeconds = 15;
+    outStartAsAdmin = true;
 
-    char buffer[1024] = {0};
-    DWORD size = sizeof(buffer);
-    result = RegQueryValueExA(hKey, "DualSenseY", NULL, NULL, (LPBYTE)buffer, &size);
-    RegCloseKey(hKey);
+    // 1. Check Task Scheduler
+    std::string taskOutput;
+    DWORD taskExitCode = 1;
+    if (RunHiddenCommandWithOutput("schtasks.exe /Query /TN \"DualSenseY\" /FO CSV /V", taskOutput, &taskExitCode) && taskExitCode == 0) {
+        outEnabled = true;
+        outStartAsAdmin = true;
 
-    if (result != ERROR_SUCCESS) {
-        outEnabled = false;
-        return false;
-    }
-
-    outEnabled = true;
-    std::string cmd(buffer);
-    size_t delayPos = cmd.find("--delay");
-    if (delayPos != std::string::npos) {
-        outDelayEnabled = true;
-        try {
-            std::string sub = cmd.substr(delayPos + 7);
-            size_t start = sub.find_first_not_of(" = \t");
-            if (start != std::string::npos) {
-                outDelaySeconds = std::clamp(std::stoi(sub.substr(start)), 5, 60);
-            } else {
+        size_t delayPos = taskOutput.find("--delay");
+        if (delayPos != std::string::npos) {
+            outDelayEnabled = true;
+            try {
+                std::string sub = taskOutput.substr(delayPos + 7);
+                size_t start = sub.find_first_not_of(" = \t\"");
+                if (start != std::string::npos) {
+                    outDelaySeconds = std::clamp(std::stoi(sub.substr(start)), 5, 60);
+                }
+            } catch (...) {
                 outDelaySeconds = 15;
             }
-        } catch (...) {
-            outDelaySeconds = 15;
         }
-    } else {
-        outDelayEnabled = false;
-        outDelaySeconds = 15;
+        return true;
     }
+
+    // 2. Check Registry Run key
+    HKEY hKey = NULL;
+    LONG result = RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_READ, &hKey);
+    if (result == ERROR_SUCCESS) {
+        char buffer[1024] = {0};
+        DWORD size = sizeof(buffer);
+        result = RegQueryValueExA(hKey, "DualSenseY", NULL, NULL, (LPBYTE)buffer, &size);
+        RegCloseKey(hKey);
+
+        if (result == ERROR_SUCCESS) {
+            outEnabled = true;
+            outStartAsAdmin = false;
+            std::string cmd(buffer);
+            size_t delayPos = cmd.find("--delay");
+            if (delayPos != std::string::npos) {
+                outDelayEnabled = true;
+                try {
+                    std::string sub = cmd.substr(delayPos + 7);
+                    size_t start = sub.find_first_not_of(" = \t");
+                    if (start != std::string::npos) {
+                        outDelaySeconds = std::clamp(std::stoi(sub.substr(start)), 5, 60);
+                    }
+                } catch (...) {
+                    outDelaySeconds = 15;
+                }
+            }
+            return true;
+        }
+    }
+
+    // Neither found: default outStartAsAdmin to true
+    outEnabled = false;
+    outStartAsAdmin = true;
+    outDelayEnabled = false;
+    outDelaySeconds = 15;
     return true;
 #else
     outEnabled = false;
+    outDelayEnabled = false;
+    outDelaySeconds = 15;
+    outStartAsAdmin = false;
     return false;
 #endif
+}
+
+bool GetAutostartWindows(bool& outEnabled, bool& outDelayEnabled, int& outDelaySeconds) {
+    bool unusedAdmin = true;
+    return GetAutostartWindows(outEnabled, outDelayEnabled, outDelaySeconds, unusedAdmin);
 }
 
 #ifdef WINDOWS

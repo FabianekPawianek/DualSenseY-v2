@@ -20,7 +20,8 @@ void DisableBluetoothDevice(const std::string& Address);
 std::string getHidHideExecutablePath();
 void DisableHidHideCloak();
 
-bool SetAutostartWindows(bool enable, bool delayEnabled, int delaySeconds);
+bool SetAutostartWindows(bool enable, bool delayEnabled, int delaySeconds, bool startAsAdmin = true);
+bool GetAutostartWindows(bool& outEnabled, bool& outDelayEnabled, int& outDelaySeconds, bool& outStartAsAdmin);
 bool GetAutostartWindows(bool& outEnabled, bool& outDelayEnabled, int& outDelaySeconds);
 
 std::string GetForegroundProcessName();

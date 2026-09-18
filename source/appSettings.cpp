@@ -35,10 +35,16 @@ void LoadAppSettings(AppSettings* appSettings) {
 	bool regEnabled = false;
 	bool regDelayEnabled = false;
 	int regDelaySeconds = 15;
-	if (GetAutostartWindows(regEnabled, regDelayEnabled, regDelaySeconds)) {
+	bool regStartAsAdmin = true;
+	if (GetAutostartWindows(regEnabled, regDelayEnabled, regDelaySeconds, regStartAsAdmin)) {
 		appSettings->startWithWindows = regEnabled;
-		appSettings->startupDelayEnabled = regDelayEnabled;
-		appSettings->startupDelaySeconds = regDelaySeconds;
+		if (regEnabled) {
+			appSettings->startupDelayEnabled = regDelayEnabled;
+			appSettings->startupDelaySeconds = regDelaySeconds;
+			appSettings->startAsAdmin = regStartAsAdmin;
+		}
+	} else {
+		appSettings->startWithWindows = false;
 	}
 #endif
 }
